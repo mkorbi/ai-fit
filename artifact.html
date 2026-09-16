@@ -1,0 +1,364 @@
+<title>Context Budget</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  color-scheme: light;
+  --ground: #eceef1; --surface: #fbfbfa; --surface-2: #f3f4f6; --line: #d6dae0; --line-2: #e7e9ec;
+  --ink: #14181d; --ink-2: #4b535d; --muted: #7b8591;
+  --accent: #a3511e; --accent-ink: #ffffff; --accent-soft: #f6e9df;
+  --good: #0ca30c; --warn: #fab219; --crit: #d03b3b; --good-text: #006300; --crit-text: #a12f2f; --warn-text: #7a5200; --info-text: #2f5f9e;
+  --good-soft: #e3f3e3; --warn-soft: #fbf0d3; --crit-soft: #f9e0e0; --info-soft: #e1ebf7;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --chart-surface: #fcfcfb; --grid: #e1e0d9; --axis: #c3c2b7; --chart-muted: #898781;
+  --font-display: 'Barlow Semi Condensed', 'Arial Narrow', 'Helvetica Neue', Helvetica, sans-serif;
+  --font-body: 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #111417; --surface: #1a1d21; --surface-2: #22262b; --line: #30363d; --line-2: #272c31;
+    --ink: #f2f3f4; --ink-2: #c3c8ce; --muted: #8b949e;
+    --accent: #e08a55; --accent-ink: #1a1008; --accent-soft: #3a2418;
+    --good-text: #4cc94c; --crit-text: #f07070; --warn-text: #f2c14e; --info-text: #7fb0ea;
+    --good-soft: #14301a; --warn-soft: #3b2f10; --crit-soft: #3d1a1a; --info-soft: #1a2a3f;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --chart-surface: #1a1a19; --grid: #2c2c2a; --axis: #383835; --chart-muted: #898781;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #111417; --surface: #1a1d21; --surface-2: #22262b; --line: #30363d; --line-2: #272c31;
+  --ink: #f2f3f4; --ink-2: #c3c8ce; --muted: #8b949e;
+  --accent: #e08a55; --accent-ink: #1a1008; --accent-soft: #3a2418;
+  --good-text: #4cc94c; --crit-text: #f07070; --warn-text: #f2c14e; --info-text: #7fb0ea;
+  --good-soft: #14301a; --warn-soft: #3b2f10; --crit-soft: #3d1a1a; --info-soft: #1a2a3f;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --chart-surface: #1a1a19; --grid: #2c2c2a; --axis: #383835; --chart-muted: #898781;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45; padding-inline: clamp(16px, 3vw, 40px); padding-block: 0 56px; }
+h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 600; margin: 0; text-wrap: balance; }
+p { margin: 0; }
+a { color: var(--accent); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+/* masthead */
+.mast { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 28px; padding-block: 18px 0; border-bottom: 1px solid var(--line); }
+.brand { display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; }
+.brand h1 { font-size: 26px; letter-spacing: 0.01em; }
+.brand .sub { color: var(--muted); font-size: 13px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-left: auto; }
+.tab { border: 0; background: transparent; padding: 10px 12px 12px; font-family: var(--font-display); font-weight: 600; font-size: 15px; letter-spacing: 0.01em; color: var(--ink-2); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* two-pane plan */
+.plan { display: grid; grid-template-columns: minmax(280px, 330px) minmax(0, 1fr); gap: 28px; padding-top: 22px; }
+.plan.wide { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 900px) { .plan { grid-template-columns: minmax(0, 1fr); gap: 20px; } .rail { position: static !important; max-height: none !important; } }
+.rail { position: sticky; top: 0; align-self: start; max-height: 100vh; overflow: auto; padding-right: 4px; scrollbar-width: thin; }
+.group { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+.group > legend { font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 0; margin-bottom: 6px; }
+.field { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; padding: 4px 0; }
+.field label { font-size: 13px; color: var(--ink-2); }
+.field input, .field select { font-family: var(--font-mono); font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); width: 10.5em; max-width: 100%; }
+.field select { width: 12.5em; }
+.field.wide { grid-template-columns: 1fr; }
+.field.wide select, .field.wide input { width: 100%; }
+.field input[type="range"] { width: 100%; padding: 0; border: 0; background: transparent; accent-color: var(--accent); }
+.field input[type="checkbox"] { width: auto; accent-color: var(--accent); justify-self: end; }
+.hint { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.hint.good { color: var(--good-text); } .hint.bad { color: var(--crit-text); }
+.inline { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.inline label { display: grid; gap: 2px; font-size: 11.5px; color: var(--muted); }
+.inline input { width: 100% !important; }
+.checks { display: grid; gap: 2px; max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; background: var(--surface); }
+.cand-vendor { font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.check input { accent-color: var(--accent); }
+.row-btns { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+details.group summary { cursor: pointer; list-style: none; }
+details.group summary::-webkit-details-marker { display: none; }
+details.group summary::after { content: ' ▸'; color: var(--muted); }
+details.group[open] summary::after { content: ' ▾'; }
+button.ghost { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); border-radius: 4px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
+button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+button.primary { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); border-radius: 4px; padding: 6px 12px; font-weight: 700; cursor: pointer; }
+
+/* results */
+.results { display: grid; gap: 18px; min-width: 0; align-content: start; }
+.verdict { padding: 14px 18px; background: var(--surface); border: 1px solid var(--line); border-left: 5px solid var(--good); display: grid; gap: 6px; }
+.verdict.warn { border-left-color: var(--warn); } .verdict.bad { border-left-color: var(--crit); }
+.verdict strong { font-family: var(--font-display); font-weight: 600; font-size: 20px; line-height: 1.2; }
+.verdict p { color: var(--ink-2); max-width: 70ch; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.kpi { background: var(--surface); padding: 12px 14px 14px; min-width: 0; }
+.kpi .l { font-size: 12px; color: var(--muted); letter-spacing: 0.02em; }
+.kpi .v { font-family: var(--font-display); font-weight: 600; font-size: 30px; line-height: 1.1; margin-top: 4px; overflow-wrap: anywhere; }
+.kpi.hero .v { font-size: 40px; }
+.kpi .s { font-size: 12px; color: var(--ink-2); margin-top: 5px; }
+.kpi.good .v::after, .kpi.bad .v::after { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 8px; vertical-align: middle; }
+.kpi.good .v::after { background: var(--good); } .kpi.bad .v::after { background: var(--crit); }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+.panel { background: var(--surface); border: 1px solid var(--line); padding: 14px 18px 16px; min-width: 0; }
+.panel h3 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.panel h4 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
+.lead { font-family: var(--font-display); font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+.membar { display: flex; gap: 2px; height: 22px; margin: 12px 0 8px; background: var(--chart-surface); }
+.membar .seg { min-width: 2px; }
+.key { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 4px 16px; font-size: 12.5px; }
+.key li { display: flex; align-items: center; gap: 8px; }
+.key i, .legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; flex: none; }
+.key i { height: 10px; width: 10px; border-radius: 2px; }
+.key .t { color: var(--ink-2); flex: 1; } .key b { font-family: var(--font-mono); font-weight: 600; font-size: 12px; }
+.tw { overflow-x: auto; }
+.tw.tall { max-height: 70vh; overflow: auto; }
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th { text-align: left; font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); padding: 6px 8px; white-space: nowrap; }
+table.data td { padding: 7px 8px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+table.data td.n, table.data th.n { text-align: right; font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.data td.t { font-family: var(--font-body); }
+table.data tr.base td { background: var(--surface-2); }
+table.data tr.muted td { color: var(--muted); }
+table.data .note { font-size: 12px; color: var(--muted); font-weight: 400; max-width: 34ch; }
+table.data small.up { color: var(--good-text); font-family: var(--font-mono); font-size: 11px; }
+table.data small.down { color: var(--crit-text); font-family: var(--font-mono); font-size: 11px; }
+.chip { display: inline-block; font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
+.chip.good { background: var(--good-soft); color: var(--good-text); } .chip.warn { background: var(--warn-soft); color: var(--warn-text); }
+.chip.bad { background: var(--crit-soft); color: var(--crit-text); } .chip.info { background: var(--info-soft); color: var(--info-text); }
+.warnings { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+#warnings h3 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+/* charts */
+.chart-wrap { display: grid; gap: 8px; }
+.chart-title { font-size: 13px; color: var(--ink-2); }
+.chart-box { position: relative; }
+svg.chart { width: 100%; height: auto; display: block; }
+svg.chart text { font-family: var(--font-mono); font-size: 11px; fill: var(--chart-muted); }
+svg.chart text.axis-title { font-family: var(--font-body); font-size: 11.5px; fill: var(--ink-2); }
+svg.chart text.ref { font-family: var(--font-body); font-size: 11px; fill: var(--ink-2); }
+.legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.legend i.dot { width: 10px; height: 10px; border-radius: 50%; }
+.tip { position: absolute; top: 28px; left: 0; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,0.12); padding: 8px 10px; font-size: 12px; pointer-events: none; min-width: 150px; z-index: 2; }
+.tip-h { font-family: var(--font-mono); color: var(--muted); margin-bottom: 4px; }
+.tip-r { display: grid; grid-template-columns: 14px auto 1fr; gap: 8px; align-items: center; }
+.tip-r i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; }
+.tip-r b { font-family: var(--font-mono); font-weight: 600; }
+.tip-r span { color: var(--ink-2); }
+.chart-foot { display: flex; justify-content: flex-end; }
+
+/* compatibility */
+table.compat th.rot { height: 150px; vertical-align: bottom; padding: 0 2px 6px; }
+table.compat th.rot span { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; font-size: 11px; letter-spacing: 0.02em; white-space: nowrap; }
+table.compat td.cell { text-align: center; font-weight: 600; min-width: 34px; }
+table.compat td.one { background: var(--good-soft); color: var(--good-text); }
+table.compat td.node { background: var(--info-soft); color: var(--info-text); }
+table.compat td.multi { background: var(--warn-soft); color: var(--warn-text); }
+table.compat td.none { color: var(--muted); }
+table.compat .sticky { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+.clegend { list-style: none; margin: 0 0 4px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 6px 20px; font-size: 13px; color: var(--ink-2); }
+.clegend li { display: flex; align-items: flex-start; gap: 10px; }
+.clegend .sample { flex: none; min-width: 34px; text-align: center; font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; padding: 3px 6px; border-radius: 3px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); }
+.clegend .sample.one { background: var(--good-soft); color: var(--good-text); border-color: transparent; }
+.clegend .sample.node { background: var(--info-soft); color: var(--info-text); border-color: transparent; }
+.clegend .sample.multi { background: var(--warn-soft); color: var(--warn-text); border-color: transparent; }
+.clegend .sample.none { color: var(--muted); }
+
+/* catalog & method */
+.vlink a { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; text-decoration: none; border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px; margin-right: 3px; }
+.vlink a:hover { border-color: var(--accent); }
+textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-size: 12px; padding: 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); resize: vertical; }
+.prose { max-width: 72ch; display: grid; gap: 10px; }
+.prose h3 { font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); margin-top: 10px; }
+.prose code { font-family: var(--font-mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
+.prose pre { font-family: var(--font-mono); font-size: 12.5px; background: var(--surface-2); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 0; }
+.prose ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+</style>
+
+<header class="mast">
+  <div class="brand">
+    <h1>Context Budget</h1>
+    <span class="sub">How many users, how much context, how much hardware for an LLM you host yourself</span>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" role="tab" data-mode="forward" aria-selected="true" type="button">Plan from hardware</button>
+    <button class="tab" role="tab" data-mode="reverse" aria-selected="false" type="button">Plan from workload</button>
+    <button class="tab" role="tab" data-mode="compat" aria-selected="false" type="button">Compatibility</button>
+    <button class="tab" role="tab" data-mode="catalog" aria-selected="false" type="button">Catalog</button>
+    <button class="tab" role="tab" data-mode="method" aria-selected="false" type="button">Method</button>
+  </nav>
+</header>
+
+<main class="plan" id="plan">
+  <aside class="rail" id="rail">
+    <fieldset class="group" id="railForward">
+      <legend>Hardware</legend>
+      <div class="field wide"><label for="hw">Accelerator</label><select id="hw"></select></div>
+      <div class="field"><label for="count">How many</label><input id="count" type="number" min="1" step="1"></div>
+      <div class="field"><label for="nodeGpus">Per node (one fabric)</label><input id="nodeGpus" type="number" min="1" step="1"></div>
+      <div class="field wide"><label for="link">Fabric inside a node</label><select id="link"></select></div>
+      <p class="hint" id="hwHint"></p>
+    </fieldset>
+    <fieldset class="group" id="railReverse" hidden>
+      <legend>Candidate hardware</legend>
+      <div class="checks" id="candidates"></div>
+      <div class="row-btns"><button class="ghost" type="button" id="candAll">All</button><button class="ghost" type="button" id="candNone">None</button></div>
+      <div class="field"><label for="allowCrossTp">Allow tensor parallel across nodes</label><input id="allowCrossTp" type="checkbox"></div>
+    </fieldset>
+    <fieldset class="group" id="railCluster">
+      <legend>Cluster</legend>
+      <div class="field wide"><label for="net">Network between nodes</label><select id="net"></select></div>
+      <div class="field"><label for="hostRam">Host RAM per node (GB)</label><input id="hostRam" type="number" min="0" step="64"></div>
+    </fieldset>
+    <fieldset class="group" id="railModel">
+      <legend>Model</legend>
+      <div class="field wide"><label for="model">Model</label><select id="model"></select></div>
+      <p class="hint" id="modelHint"></p>
+      <div class="field"><label for="engine">Serving engine</label><select id="engine"></select></div>
+      <p class="hint" id="engineHint"></p>
+      <div class="field"><label for="wPrec">Weight precision</label><select id="wPrec"></select></div>
+      <p class="hint" id="precHint"></p>
+      <div class="field"><label for="kvPrec">KV cache precision</label><select id="kvPrec"></select></div>
+      <div class="field"><label for="par">Parallel layout</label><select id="par"><option value="auto">Best for this workload</option><option value="manual">Set by hand</option></select></div>
+      <div class="inline" id="manualPar" hidden>
+        <label>Tensor (TP)<input id="tp" type="number" min="1" step="1"></label>
+        <label>Pipeline (PP)<input id="pp" type="number" min="1" step="1"></label>
+        <label>Replicas<input id="reps" type="number" min="1" step="1"></label>
+      </div>
+      <div class="field"><label for="dpAttn">Data-parallel attention (no KV replication across TP ranks)</label><input id="dpAttn" type="checkbox"></div>
+    </fieldset>
+    <fieldset class="group" id="railWorkload">
+      <legend>Workload</legend>
+      <div class="field"><label for="users">Users</label><input id="users" type="number" min="1" step="1"></div>
+      <div class="field"><label for="activityPreset">Usage pattern</label><select id="activityPreset"><option value="chat">Chat: 10% of time active</option><option value="assist">Assistant: 25%</option><option value="agents">Coding agents: 60%</option><option value="batch">Batch / API: 100%</option><option value="custom">Custom</option></select></div>
+      <div class="field"><label for="activity">Share of time a user has a request in flight (%)</label><input id="activity" type="number" min="1" max="100" step="1"></div>
+      <div class="field"><label for="ctx">Context per session (tokens)</label><input id="ctx" type="number" min="1024" step="1024"></div>
+      <div class="field wide"><input id="ctxRange" type="range" min="0" max="1200" step="1" aria-label="Context per session, logarithmic"></div>
+      <div class="field"><label for="prefix">Shared prefix (system prompt, shared docs)</label><input id="prefix" type="number" min="0" step="256"></div>
+      <div class="field"><label for="newPrompt">New prompt tokens per turn</label><input id="newPrompt" type="number" min="1" step="100"></div>
+      <div class="field"><label for="output">Output tokens per turn</label><input id="output" type="number" min="1" step="100"></div>
+      <div class="field wide"><label for="retention">Idle sessions' KV cache</label><select id="retention"><option value="host">Parked in host RAM, restored on the next turn</option><option value="gpu">Kept in GPU memory</option><option value="none">Evicted, whole conversation re-prefilled</option></select></div>
+      <div class="field"><label for="target">Minimum tok/s per user</label><input id="target" type="number" min="0.1" step="1"></div>
+      <div class="field"><label for="ttftMax">Longest acceptable time to first token (s)</label><input id="ttftMax" type="number" min="0.1" step="1"></div>
+    </fieldset>
+    <fieldset class="group" id="railOpt">
+      <legend>Optimizations</legend>
+      <div class="field"><label for="prefixCache">Prefix caching of the shared prefix</label><input id="prefixCache" type="checkbox"></div>
+      <div class="field"><label for="spec">Speculative decoding / multi-token prediction</label><input id="spec" type="checkbox"></div>
+      <div class="inline" id="specOpts" hidden>
+        <label>Draft tokens<input id="specK" type="number" min="1" max="16" step="1"></label>
+        <label>Accepted %<input id="specAlpha" type="number" min="5" max="99" step="5"></label>
+      </div>
+      <div class="field"><label for="pd">Prefill / decode disaggregation</label><input id="pd" type="checkbox"></div>
+    </fieldset>
+    <details class="group" id="railAdv">
+      <summary><legend>Assumptions</legend></summary>
+      <div class="field"><label for="advUtil">Memory the engine may use (%)</label><input id="advUtil" type="number" min="50" max="100" step="1"></div>
+      <div class="field"><label for="advOverheadGB">Runtime overhead per accelerator (GB)</label><input id="advOverheadGB" type="number" min="0" step="0.5"></div>
+      <div class="field"><label for="advOverheadFrac">Activation overhead (% of weight shard)</label><input id="advOverheadFrac" type="number" min="0" step="1"></div>
+      <div class="field"><label for="advFrag">KV block fragmentation (%)</label><input id="advFrag" type="number" min="0" step="1"></div>
+      <div class="field"><label for="advBwEff">Achieved memory bandwidth (%)</label><input id="advBwEff" type="number" min="10" max="100" step="5"></div>
+      <div class="field"><label for="advMfu">Achieved tensor FLOPS (%)</label><input id="advMfu" type="number" min="10" max="100" step="5"></div>
+      <div class="field"><label for="advCollEff">Achieved link bandwidth in collectives (%)</label><input id="advCollEff" type="number" min="10" max="100" step="5"></div>
+      <div class="field"><label for="advPpBubble">Pipeline bubble per extra stage (%)</label><input id="advPpBubble" type="number" min="0" step="1"></div>
+      <div class="field"><label for="advHostRestore">Host-to-GPU restore (GB/s per GPU)</label><input id="advHostRestore" type="number" min="1" step="1"></div>
+      <div class="row-btns"><button class="ghost" type="button" id="resetInputs">Reset every input</button></div>
+    </details>
+  </aside>
+
+  <section class="results">
+    <div class="view" data-mode="forward" id="viewForward">
+      <div class="results">
+        <div id="verdict" class="verdict"></div>
+        <div id="kpis" class="kpis"></div>
+        <div class="two">
+          <section class="panel"><h3>Layout and memory</h3><div id="configBody"></div></section>
+          <section class="panel"><h3>Where the time goes</h3><div id="bottleneckBody"></div></section>
+        </div>
+        <section class="panel"><h3>Capacity frontier</h3><div id="chartCapacity"></div></section>
+        <section class="panel"><h3>Speed per user under load</h3><div id="chartSpeed"></div></section>
+        <section class="panel"><h3>Ways to serve more</h3><div id="ledger"></div></section>
+        <section id="warnings"></section>
+      </div>
+    </div>
+
+    <div class="view" data-mode="reverse" id="viewReverse" hidden>
+      <div class="results">
+        <div class="verdict"><strong>What do I need for this workload?</strong><p id="revIntro"></p></div>
+        <div id="revSummary" class="kpis"></div>
+        <section class="panel"><h3>Smallest layout per accelerator</h3><div id="revTable"></div><p class="hint" style="margin-top:8px">Prices are approximate on-demand cloud rates per accelerator-hour and are editable in the catalog. Power counts accelerators only. Each row is the cheapest-in-count layout; open one to see its memory bar, timing and the optimization ledger.</p></section>
+      </div>
+    </div>
+
+    <div class="view" data-mode="compat" id="viewCompat" hidden>
+      <div class="results">
+        <div class="verdict"><strong>Which model runs on which hardware?</strong><p id="compatIntro"></p></div>
+        <section class="panel">
+          <h3>How to read the matrix</h3>
+          <ul class="clegend" id="compatLegend"></ul>
+          <div class="field" style="max-width:420px;margin-top:12px"><label for="compatCtx">Room for one session of</label><select id="compatCtx"><option value="8192">8k tokens</option><option value="32768">32k tokens</option><option value="131072">128k tokens</option><option value="262144">256k tokens</option><option value="1048576">1M tokens</option></select></div>
+          <div id="compatTable"></div>
+        </section>
+      </div>
+    </div>
+
+    <div class="view" data-mode="catalog" id="viewCatalog" hidden>
+      <div class="results">
+        <section class="panel"><h3>Accelerators</h3><div id="catHardware"></div><p class="hint" style="margin-top:8px">~ marks entries with announced, derived or otherwise unconfirmed figures. Memory in decimal GB, bandwidth in GB/s, compute as dense TFLOPS (no sparsity). Native and weight-only formats come from the chip generation (one table per generation in catalog.js), not from the per-device row.</p><p class="hint" id="catLint" style="margin-top:6px"></p></section>
+        <section class="panel"><h3>Engine support</h3><div id="catEngines"></div><p class="hint" style="margin-top:8px">Which weight formats and KV-cache dtypes each serving engine runs per hardware family, transcribed from the engines' docs on the date shown. "native" computes in that format, "weight-only" keeps the weights small but computes in BF16. Sources are linked below the table.</p></section>
+        <section class="panel"><h3>Models</h3><div id="catModels"></div><p class="hint" style="margin-top:8px">KV per token counts every layer's K and V (or the MLA latent) in BF16; sliding-window layers still count in full here but are capped at their window when a session is sized. "Verified against" names the Hugging Face repo whose config.json the shape was checked against with <code>node tools/import-model.js --check</code>; "ships in" is the checkpoint's own precision.</p></section>
+        <section class="panel"><h3>Add your own</h3>
+          <p class="hint">Paste one JSON object or an array. Hardware needs <code>id, name, mem, bw</code> and ideally <code>tflops: {fp16, fp8, fp4}, link, linkBw, nodeGpus, tdp, price</code>. Models need <code>id, name, params, layers, dModel, nHeads, nKv, dHead, maxCtx</code> and optionally <code>active, moe, attn, sparse, statePerSeqMB, nativeCtx</code>. Same ids replace the built-in entry. Entries are kept in this browser only.</p>
+          <textarea id="customJson" spellcheck="false" placeholder='{"id":"my-gpu","vendor":"Acme","name":"Acme X1 128 GB","mem":128,"bw":4000,"tflops":{"fp16":800,"fp8":1600},"link":"nvlink","linkBw":900,"nodeGpus":8,"tdp":600,"price":2.5}'></textarea>
+          <div class="row-btns"><button class="primary" type="button" id="addHw">Add as hardware</button><button class="primary" type="button" id="addModel">Add as model</button><button class="ghost" type="button" id="exportJson">Show full catalog as JSON</button><button class="ghost" type="button" id="resetCustom">Remove custom entries</button></div>
+          <p class="hint" id="customMsg"></p>
+        </section>
+      </div>
+    </div>
+
+    <div class="view" data-mode="method" id="viewMethod" hidden>
+      <section class="panel prose">
+        <h2>How the numbers are made</h2>
+        <p>Everything here is a roofline estimate. It is meant to get the order of magnitude and the trade-offs right (memory versus bandwidth versus compute versus network) before you rent or buy anything. Measure on the real stack before you commit; the assumptions panel lets you dial the model to what you measure.</p>
+        <h3>Memory</h3>
+        <p>Each accelerator may use <code>util</code> of its memory (vLLM's <code>gpu_memory_utilization</code>). The weights of one replica are split evenly over its TP × PP accelerators; a fixed runtime overhead plus a share of the weight shard is reserved on each. What remains is the KV cache pool of the replica:</p>
+        <pre>pool = TP·PP · (mem·util − overhead) − weights
+weights = params · (0.98 · bytes(precision) + 0.02 · 2)</pre>
+        <p>Bytes per parameter: BF16 2, FP8 and INT8 1, INT4 0.52, FP4 0.53 (group scales included). KV bytes per token per layer: <code>2 · kv_heads · head_dim · bytes</code> for standard and grouped-query attention, <code>(d_c + d_rope) · bytes</code> for multi-head latent attention, nothing for linear-attention or state-space layers (they keep a small constant state per sequence). Sliding-window and chunked layers hold at most <code>window</code> tokens. A shared prefix that is prefix-cached is stored once per replica and subtracted from every session; the pool also loses a fragmentation share to paged blocks. When TP exceeds the number of KV heads (or the model uses MLA) the KV cache is replicated across ranks unless data-parallel attention is on.</p>
+        <p><strong>Sessions resident.</strong> With "kept in GPU memory" every user's session must fit; otherwise only in-flight requests (users × activity) do. Idle sessions parked in host RAM count against <code>0.8 · host RAM · nodes</code>; the remainder re-prefill from cold.</p>
+        <h3>Decode</h3>
+        <p>One decode step for a batch of <code>b</code> requests reads the weights that are touched (for mixture-of-experts: <code>1 − (1 − k/E)^tokens</code> of the routed experts, plus the dense part) and the KV cache of every request, then runs <code>2 · active_params + attention</code> FLOPs per token. Pipeline stages re-read the weights per micro-batch, which is why PP is slower than TP inside a node:</p>
+        <pre>t_bw   = (weights_read + b · kv(ctx) / PP) / (TP · bandwidth · bw_eff)
+t_comp = b · (2 · active + attn_flops(ctx)) / (TP · PP · peak · mfu)
+t_comm = 2 · layers · (latency + bytes / link_bw)   for TP > 1
+step   = (max(t_bw, t_comp) + t_comm) · (1 + bubble · (PP − 1) / PP)</pre>
+        <p>Attention FLOPs per token per layer are <code>2 · heads · (d_qk + d_v) · context</code>, capped at the window for local layers and at top-k (plus a light indexer) for sparse attention; MLA uses the absorbed form with <code>d_c + d_rope</code> and <code>d_c</code>. Peak compute follows the weight precision when the accelerator has native FP8 / FP4 tensor cores; weight-only formats run in BF16. Collectives cross the inter-node network when TP is wider than a node.</p>
+        <h3>Prefill and turns</h3>
+        <p>A turn prefills only the tokens that are not cached: the new prompt when the session's KV was retained, the whole conversation minus the shared prefix when it was evicted. Prefill runs on the TP accelerators of one replica at <code>mfu</code> of peak; attention costs <code>2 · heads · (d_qk + d_v) · Σ min(position, window)</code> over the new positions. Restoring a parked session adds <code>kv_session / (TP · restore_bw)</code>. Time to first token is the warm case for the retention policy you chose; the cold case is shown next to it.</p>
+        <p>Prefill and decode share the accelerators (chunked prefill): with <code>λ</code> requests per second per replica, prefill takes a share <code>f = λ · prefill_flops / (TP · PP · peak · mfu)</code> of the time and every decode step stretches by <code>1 / (1 − f)</code>. <code>λ = b / (TTFT + output · ITL)</code> is solved as a fixed point. Above 85% the replica is called prefill-saturated. With prefill/decode disaggregation that work moves to a separate pool sized <code>λ · prefill_flops / (peak · mfu)</code> accelerators per replica.</p>
+        <h3>Speculative decoding</h3>
+        <p>With <code>k</code> draft tokens accepted at rate <code>α</code>, a step produces <code>(1 − α^(k+1)) / (1 − α)</code> tokens while its compute and collective traffic grow by <code>k + 1</code> and memory traffic barely changes, so the gain is largest when decode is memory-bound and fades once compute saturates.</p>
+        <h3>Capacity and the reverse search</h3>
+        <p>For a layout, the memory limit is the number of sessions that fit the pool; the speed limit is the largest batch per replica whose per-user tokens/s still clear the target without prefill saturation, provided the time to first token is within its limit (a binary search over the load model). Concurrency is the lower of the two times the replica count; users are concurrency divided by activity. The context-at-load figure inverts the memory equation for the sessions you asked to keep resident.</p>
+        <p>"Best for this workload" tries every TP in {1…64} that divides the head count (across nodes only if you allow it) and every PP in {1…16}, filling the accelerator count with replicas, and keeps the layout with the most users, then the fewest idle accelerators, then the highest per-user speed. The workload planner does the same per candidate accelerator with an open count: it sizes one replica, multiplies until the users fit, and keeps the smallest count, then the lowest hourly price. Cost per million output tokens is hourly price over aggregate decode throughput.</p>
+        <h3>What is not modeled</h3>
+        <ul>
+          <li>Scheduling detail: queueing, batching windows, chunk sizes, CUDA graph capture limits, CPU overhead of the serving process.</li>
+          <li>Expert-parallel all-to-all traffic (treated like the tensor-parallel all-reduce), load imbalance across experts, and MoE kernels that run below the BF16 roofline.</li>
+          <li>Quality effects of quantization or RoPE scaling; the tool only flags contexts beyond the native window.</li>
+          <li>Vision encoders, tool-call overheads, and multi-LoRA serving.</li>
+        </ul>
+        <p class="hint">Catalog figures come from vendor data sheets and model cards as of mid-2026; entries marked ~ are announced or derived. Correct them in the catalog view if you have better numbers.</p>
+      </section>
+    </div>
+  </section>
+</main>
+
+<script src="catalog.js"></script>
+<script src="engine.js"></script>
+<script src="app.js"></script>
