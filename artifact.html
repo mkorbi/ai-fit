@@ -169,6 +169,19 @@ table.compat .sticky { position: sticky; left: 0; background: var(--surface); z-
 .clegend .sample.multi { background: var(--warn-soft); color: var(--warn-text); border-color: transparent; }
 .clegend .sample.none { color: var(--muted); }
 
+/* glossary tooltips */
+.term { text-decoration: underline dotted; text-decoration-color: var(--muted); text-underline-offset: 3px; cursor: help; border-radius: 2px; }
+.term:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#tipbox { position: fixed; z-index: 60; max-width: 340px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0,0,0,0.16); padding: 10px 12px 11px; font-size: 12.5px; line-height: 1.45; pointer-events: none; }
+#tipbox b { font-family: var(--font-display); font-size: 14px; font-weight: 600; display: block; margin-bottom: 3px; }
+#tipbox p { margin: 0 0 6px; color: var(--ink-2); }
+.tip-meta { display: grid; gap: 3px; font-size: 12px; color: var(--ink-2); }
+.tip-meta i, .gmeta i { font-style: normal; font-family: var(--font-display); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11px; color: var(--muted); }
+dl.glossary { margin: 0; display: grid; gap: 10px; }
+dl.glossary dt { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
+.gmeta { font-size: 12.5px; margin-top: 2px; }
+
 /* catalog & method */
 .vlink a { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; text-decoration: none; border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px; margin-right: 3px; }
 .vlink a:hover { border-color: var(--accent); }
@@ -198,10 +211,10 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
   <aside class="rail" id="rail">
     <fieldset class="group" id="railForward">
       <legend>Hardware</legend>
-      <div class="field wide"><label for="hw">Accelerator</label><select id="hw"></select></div>
-      <div class="field"><label for="count">How many</label><input id="count" type="number" min="1" step="1"></div>
-      <div class="field"><label for="nodeGpus">Per node (one fabric)</label><input id="nodeGpus" type="number" min="1" step="1"></div>
-      <div class="field wide"><label for="link">Fabric inside a node</label><select id="link"></select></div>
+      <div class="field wide"><label for="hw"><span class="term" data-term="accelerator" tabindex="0">Accelerator</span></label><select id="hw"></select></div>
+      <div class="field"><label for="count"><span class="term" data-term="count" tabindex="0">How many</span></label><input id="count" type="number" min="1" step="1"></div>
+      <div class="field"><label for="nodeGpus"><span class="term" data-term="node-gpus" tabindex="0">Per node (one fabric)</span></label><input id="nodeGpus" type="number" min="1" step="1"></div>
+      <div class="field wide"><label for="link"><span class="term" data-term="fabric" tabindex="0">Fabric inside a node</span></label><select id="link"></select></div>
       <p class="hint" id="hwHint"></p>
     </fieldset>
     <fieldset class="group" id="railReverse" hidden>
@@ -212,61 +225,61 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
     </fieldset>
     <fieldset class="group" id="railCluster">
       <legend>Cluster</legend>
-      <div class="field wide"><label for="net">Network between nodes</label><select id="net"></select></div>
-      <div class="field"><label for="hostRam">Host RAM per node (GB)</label><input id="hostRam" type="number" min="0" step="64"></div>
+      <div class="field wide"><label for="net"><span class="term" data-term="network" tabindex="0">Network between nodes</span></label><select id="net"></select></div>
+      <div class="field"><label for="hostRam"><span class="term" data-term="host-ram" tabindex="0">Host RAM per node (GB)</span></label><input id="hostRam" type="number" min="0" step="64"></div>
     </fieldset>
     <fieldset class="group" id="railModel">
       <legend>Model</legend>
-      <div class="field wide"><label for="model">Model</label><select id="model"></select></div>
+      <div class="field wide"><label for="model"><span class="term" data-term="model" tabindex="0">Model</span></label><select id="model"></select></div>
       <p class="hint" id="modelHint"></p>
-      <div class="field"><label for="engine">Serving engine</label><select id="engine"></select></div>
+      <div class="field"><label for="engine"><span class="term" data-term="engine" tabindex="0">Serving engine</span></label><select id="engine"></select></div>
       <p class="hint" id="engineHint"></p>
-      <div class="field"><label for="wPrec">Weight precision</label><select id="wPrec"></select></div>
+      <div class="field"><label for="wPrec"><span class="term" data-term="w-prec" tabindex="0">Weight precision</span></label><select id="wPrec"></select></div>
       <p class="hint" id="precHint"></p>
-      <div class="field"><label for="kvPrec">KV cache precision</label><select id="kvPrec"></select></div>
-      <div class="field"><label for="par">Parallel layout</label><select id="par"><option value="auto">Best for this workload</option><option value="manual">Set by hand</option></select></div>
+      <div class="field"><label for="kvPrec"><span class="term" data-term="kv-prec" tabindex="0">KV cache precision</span></label><select id="kvPrec"></select></div>
+      <div class="field"><label for="par"><span class="term" data-term="layout" tabindex="0">Parallel layout</span></label><select id="par"><option value="auto">Best for this workload</option><option value="manual">Set by hand</option></select></div>
       <div class="inline" id="manualPar" hidden>
-        <label>Tensor (TP)<input id="tp" type="number" min="1" step="1"></label>
-        <label>Pipeline (PP)<input id="pp" type="number" min="1" step="1"></label>
-        <label>Replicas<input id="reps" type="number" min="1" step="1"></label>
+        <label><span class="term" data-term="tp" tabindex="0">Tensor (TP)</span><input id="tp" type="number" min="1" step="1"></label>
+        <label><span class="term" data-term="pp" tabindex="0">Pipeline (PP)</span><input id="pp" type="number" min="1" step="1"></label>
+        <label><span class="term" data-term="replicas" tabindex="0">Replicas</span><input id="reps" type="number" min="1" step="1"></label>
       </div>
-      <div class="field"><label for="dpAttn">Data-parallel attention (no KV replication across TP ranks)</label><input id="dpAttn" type="checkbox"></div>
+      <div class="field"><label for="dpAttn"><span class="term" data-term="dp-attn" tabindex="0">Data-parallel attention (no KV replication across TP ranks)</span></label><input id="dpAttn" type="checkbox"></div>
     </fieldset>
     <fieldset class="group" id="railWorkload">
       <legend>Workload</legend>
-      <div class="field"><label for="users">Users</label><input id="users" type="number" min="1" step="1"></div>
+      <div class="field"><label for="users"><span class="term" data-term="users" tabindex="0">Users</span></label><input id="users" type="number" min="1" step="1"></div>
       <div class="field"><label for="activityPreset">Usage pattern</label><select id="activityPreset"><option value="chat">Chat: 10% of time active</option><option value="assist">Assistant: 25%</option><option value="agents">Coding agents: 60%</option><option value="batch">Batch / API: 100%</option><option value="custom">Custom</option></select></div>
-      <div class="field"><label for="activity">Share of time a user has a request in flight (%)</label><input id="activity" type="number" min="1" max="100" step="1"></div>
-      <div class="field"><label for="ctx">Context per session (tokens)</label><input id="ctx" type="number" min="1024" step="1024"></div>
+      <div class="field"><label for="activity"><span class="term" data-term="activity" tabindex="0">Share of time a user has a request in flight (%)</span></label><input id="activity" type="number" min="1" max="100" step="1"></div>
+      <div class="field"><label for="ctx"><span class="term" data-term="ctx" tabindex="0">Context per session (tokens)</span></label><input id="ctx" type="number" min="1024" step="1024"></div>
       <div class="field wide"><input id="ctxRange" type="range" min="0" max="1200" step="1" aria-label="Context per session, logarithmic"></div>
-      <div class="field"><label for="prefix">Shared prefix (system prompt, shared docs)</label><input id="prefix" type="number" min="0" step="256"></div>
-      <div class="field"><label for="newPrompt">New prompt tokens per turn</label><input id="newPrompt" type="number" min="1" step="100"></div>
-      <div class="field"><label for="output">Output tokens per turn</label><input id="output" type="number" min="1" step="100"></div>
-      <div class="field wide"><label for="retention">Idle sessions' KV cache</label><select id="retention"><option value="host">Parked in host RAM, restored on the next turn</option><option value="gpu">Kept in GPU memory</option><option value="none">Evicted, whole conversation re-prefilled</option></select></div>
-      <div class="field"><label for="target">Minimum tok/s per user</label><input id="target" type="number" min="0.1" step="1"></div>
-      <div class="field"><label for="ttftMax">Longest acceptable time to first token (s)</label><input id="ttftMax" type="number" min="0.1" step="1"></div>
+      <div class="field"><label for="prefix"><span class="term" data-term="prefix" tabindex="0">Shared prefix (system prompt, shared docs)</span></label><input id="prefix" type="number" min="0" step="256"></div>
+      <div class="field"><label for="newPrompt"><span class="term" data-term="new-prompt" tabindex="0">New prompt tokens per turn</span></label><input id="newPrompt" type="number" min="1" step="100"></div>
+      <div class="field"><label for="output"><span class="term" data-term="output" tabindex="0">Output tokens per turn</span></label><input id="output" type="number" min="1" step="100"></div>
+      <div class="field wide"><label for="retention"><span class="term" data-term="retention" tabindex="0">Idle sessions' KV cache</span></label><select id="retention"><option value="host">Parked in host RAM, restored on the next turn</option><option value="gpu">Kept in GPU memory</option><option value="none">Evicted, whole conversation re-prefilled</option></select></div>
+      <div class="field"><label for="target"><span class="term" data-term="target" tabindex="0">Minimum tok/s per user</span></label><input id="target" type="number" min="0.1" step="1"></div>
+      <div class="field"><label for="ttftMax"><span class="term" data-term="ttft-max" tabindex="0">Longest acceptable time to first token (s)</span></label><input id="ttftMax" type="number" min="0.1" step="1"></div>
     </fieldset>
     <fieldset class="group" id="railOpt">
       <legend>Optimizations</legend>
-      <div class="field"><label for="prefixCache">Prefix caching of the shared prefix</label><input id="prefixCache" type="checkbox"></div>
-      <div class="field"><label for="spec">Speculative decoding / multi-token prediction</label><input id="spec" type="checkbox"></div>
+      <div class="field"><label for="prefixCache"><span class="term" data-term="prefix-caching" tabindex="0">Prefix caching of the shared prefix</span></label><input id="prefixCache" type="checkbox"></div>
+      <div class="field"><label for="spec"><span class="term" data-term="spec" tabindex="0">Speculative decoding / multi-token prediction</span></label><input id="spec" type="checkbox"></div>
       <div class="inline" id="specOpts" hidden>
-        <label>Draft tokens<input id="specK" type="number" min="1" max="16" step="1"></label>
-        <label>Accepted %<input id="specAlpha" type="number" min="5" max="99" step="5"></label>
+        <label><span class="term" data-term="spec-k" tabindex="0">Draft tokens</span><input id="specK" type="number" min="1" max="16" step="1"></label>
+        <label><span class="term" data-term="spec-alpha" tabindex="0">Accepted %</span><input id="specAlpha" type="number" min="5" max="99" step="5"></label>
       </div>
-      <div class="field"><label for="pd">Prefill / decode disaggregation</label><input id="pd" type="checkbox"></div>
+      <div class="field"><label for="pd"><span class="term" data-term="pd" tabindex="0">Prefill / decode disaggregation</span></label><input id="pd" type="checkbox"></div>
     </fieldset>
     <details class="group" id="railAdv">
       <summary><legend>Assumptions</legend></summary>
-      <div class="field"><label for="advUtil">Memory the engine may use (%)</label><input id="advUtil" type="number" min="50" max="100" step="1"></div>
-      <div class="field"><label for="advOverheadGB">Runtime overhead per accelerator (GB)</label><input id="advOverheadGB" type="number" min="0" step="0.5"></div>
-      <div class="field"><label for="advOverheadFrac">Activation overhead (% of weight shard)</label><input id="advOverheadFrac" type="number" min="0" step="1"></div>
-      <div class="field"><label for="advFrag">KV block fragmentation (%)</label><input id="advFrag" type="number" min="0" step="1"></div>
-      <div class="field"><label for="advBwEff">Achieved memory bandwidth (%)</label><input id="advBwEff" type="number" min="10" max="100" step="5"></div>
-      <div class="field"><label for="advMfu">Achieved tensor FLOPS (%)</label><input id="advMfu" type="number" min="10" max="100" step="5"></div>
-      <div class="field"><label for="advCollEff">Achieved link bandwidth in collectives (%)</label><input id="advCollEff" type="number" min="10" max="100" step="5"></div>
-      <div class="field"><label for="advPpBubble">Pipeline bubble per extra stage (%)</label><input id="advPpBubble" type="number" min="0" step="1"></div>
-      <div class="field"><label for="advHostRestore">Host-to-GPU restore (GB/s per GPU)</label><input id="advHostRestore" type="number" min="1" step="1"></div>
+      <div class="field"><label for="advUtil"><span class="term" data-term="util" tabindex="0">Memory the engine may use (%)</span></label><input id="advUtil" type="number" min="50" max="100" step="1"></div>
+      <div class="field"><label for="advOverheadGB"><span class="term" data-term="overhead-gb" tabindex="0">Runtime overhead per accelerator (GB)</span></label><input id="advOverheadGB" type="number" min="0" step="0.5"></div>
+      <div class="field"><label for="advOverheadFrac"><span class="term" data-term="overhead-frac" tabindex="0">Activation overhead (% of weight shard)</span></label><input id="advOverheadFrac" type="number" min="0" step="1"></div>
+      <div class="field"><label for="advFrag"><span class="term" data-term="frag" tabindex="0">KV block fragmentation (%)</span></label><input id="advFrag" type="number" min="0" step="1"></div>
+      <div class="field"><label for="advBwEff"><span class="term" data-term="bw-eff" tabindex="0">Achieved memory bandwidth (%)</span></label><input id="advBwEff" type="number" min="10" max="100" step="5"></div>
+      <div class="field"><label for="advMfu"><span class="term" data-term="mfu" tabindex="0">Achieved tensor FLOPS (%)</span></label><input id="advMfu" type="number" min="10" max="100" step="5"></div>
+      <div class="field"><label for="advCollEff"><span class="term" data-term="coll-eff" tabindex="0">Achieved link bandwidth in collectives (%)</span></label><input id="advCollEff" type="number" min="10" max="100" step="5"></div>
+      <div class="field"><label for="advPpBubble"><span class="term" data-term="pp-bubble" tabindex="0">Pipeline bubble per extra stage (%)</span></label><input id="advPpBubble" type="number" min="0" step="1"></div>
+      <div class="field"><label for="advHostRestore"><span class="term" data-term="host-restore" tabindex="0">Host-to-GPU restore (GB/s per GPU)</span></label><input id="advHostRestore" type="number" min="1" step="1"></div>
       <div class="row-btns"><button class="ghost" type="button" id="resetInputs">Reset every input</button></div>
     </details>
   </aside>
@@ -355,10 +368,16 @@ step   = (max(t_bw, t_comp) + t_comm) · (1 + bubble · (PP − 1) / PP)</pre>
         </ul>
         <p class="hint">Catalog figures come from vendor data sheets and model cards as of mid-2026; entries marked ~ are announced or derived. Correct them in the catalog view if you have better numbers.</p>
       </section>
+      <section class="panel prose" style="margin-top:18px">
+        <h2>Glossary</h2>
+        <p>Every dotted term in the app has one of these behind it: hover, focus or tap the term for the short version.</p>
+        <dl class="glossary" id="glossary"></dl>
+      </section>
     </div>
   </section>
 </main>
 
 <script src="catalog.js"></script>
+<script src="glossary.js"></script>
 <script src="engine.js"></script>
 <script src="app.js"></script>

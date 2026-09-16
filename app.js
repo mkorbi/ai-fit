@@ -25,6 +25,42 @@
     for (const kid of kids.flat(Infinity)) { if (kid == null) continue; el.append(kid.nodeType ? kid : document.createTextNode(String(kid))); }
     return el;
   }
+  /* ---------- glossary tooltips ---------- */
+  const T = (key, text) => (GLOSSARY[key] ? h('span', { class: 'term', 'data-term': key, tabindex: 0 }, text) : document.createTextNode(text));
+  function initTooltips() {
+    const box = h('div', { id: 'tipbox', role: 'tooltip', hidden: true });
+    document.body.append(box);
+    let current = null, pinned = false;
+    const fill = (key) => {
+      const g = GLOSSARY[key]; if (!g) return false;
+      box.replaceChildren(h('b', null, g.t), h('p', null, g.d), h('div', { class: 'tip-meta' },
+        g.typ ? h('span', null, h('i', null, 'Typical'), ' ', g.typ) : null,
+        g.lo ? h('span', null, h('i', null, 'Low'), ' ', g.lo) : null,
+        g.hi ? h('span', null, h('i', null, 'High'), ' ', g.hi) : null));
+      return true;
+    };
+    const place = (el) => {
+      const r = el.getBoundingClientRect(); box.hidden = false;
+      const bw = box.offsetWidth, bh = box.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+      let left = Math.min(Math.max(8, r.left), vw - bw - 8);
+      let top = r.bottom + 8; if (top + bh > vh - 8) top = Math.max(8, r.top - bh - 8);
+      box.style.left = left + 'px'; box.style.top = top + 'px';
+    };
+    const show = (el) => { if (!fill(el.dataset.term)) return; current = el; el.setAttribute('aria-describedby', 'tipbox'); place(el); };
+    const hide = () => { if (current) current.removeAttribute('aria-describedby'); current = null; pinned = false; box.hidden = true; };
+    document.addEventListener('mouseover', (e) => { const el = e.target.closest && e.target.closest('.term'); if (el && !pinned) show(el); });
+    document.addEventListener('mouseout', (e) => { const el = e.target.closest && e.target.closest('.term'); if (el && !pinned && el === current) hide(); });
+    document.addEventListener('focusin', (e) => { const el = e.target.closest && e.target.closest('.term'); if (el) { pinned = false; show(el); } });
+    document.addEventListener('focusout', (e) => { const el = e.target.closest && e.target.closest('.term'); if (el && !pinned) hide(); });
+    document.addEventListener('click', (e) => { const el = e.target.closest && e.target.closest('.term'); if (el) { if (pinned && el === current) hide(); else { show(el); pinned = true; } } else if (pinned) hide(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+    window.addEventListener('scroll', () => { if (current && !pinned) hide(); }, true);
+  }
+  function renderGlossary() {
+    const el = $('#glossary'); if (!el) return;
+    const entries = Object.values(GLOSSARY).sort((a, b) => a.t.localeCompare(b.t));
+    el.replaceChildren(...entries.map((g) => [h('dt', null, g.t), h('dd', null, g.d, g.typ ? h('div', { class: 'gmeta' }, h('i', null, 'Typical '), g.typ) : null, g.lo ? h('div', { class: 'gmeta' }, h('i', null, 'Low '), g.lo) : null, g.hi ? h('div', { class: 'gmeta' }, h('i', null, 'High '), g.hi) : null)]).flat());
+  }
   const fmtNum = (n, d = 0) => (n == null || !isFinite(n)) ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: d });
   const fmtMoney = (n, d = 2) => (n == null || !isFinite(n)) ? '—' : '$' + n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   const fmtTokS = (n) => (n == null || !isFinite(n)) ? '—' : (n >= 100 ? fmtNum(n) : n.toFixed(1));
@@ -281,12 +317,12 @@
     // KPIs
     const a = r.at;
     const tiles = [
-      tile('Concurrent requests supported', r.fits ? fmtNum(r.maxConc) : '0', r.fits ? `≈ ${fmtNum(r.maxUsers)} users at ${pct(wl.activity)} active · you asked for ${fmtNum(r.B)}` : 'model does not load', r.fits && r.maxConc >= r.B ? 'good' : 'bad', true),
-      tile('Context per session at your load', r.fits ? fmtTok(r.maxCtxAtLoad) : '—', `${fmtNum(r.sessionsPerRep)} sessions resident per replica · model max ${fmtTok(model.maxCtx)}`, r.maxCtxAtLoad >= wl.ctx ? 'good' : 'bad'),
-      tile('Speed per user', a ? fmtTokS(a.perUser) + ' tok/s' : '—', a ? `target ≥ ${wl.target} · ${fmtTime(a.itl)} between tokens` : '', a && a.perUser >= wl.target && !a.saturated ? 'good' : 'bad'),
-      tile('Aggregate throughput', a ? fmtNum(r.aggTotal) + ' tok/s' : '—', r.costPerMTok != null ? `${fmtMoney(r.costPerMTok)} per 1M output tokens at ~${fmtMoney(r.price, 0)}/h` : (r.kW ? `${fmtNum(r.kW, 1)} kW of accelerators` : '')),
-      tile('Time to first token', a ? fmtTime(r.ttft) : '—', a ? `limit ${fmtTime(wl.ttftMax)} · first turn from cold: ${fmtTime(r.ttftCold)} for ${fmtTok(r.coldNew)} tokens` : '', a ? (r.ttftOK ? 'good' : 'bad') : null),
-      tile('KV cache per session', fmtGB(r.kv.perSession), `${fmtGB(E.kvPerTokenFull(model, p.kvPrec))}/token · pool ${fmtGB(r.kvAvail)} per replica`),
+      tile('Concurrent requests supported', r.fits ? fmtNum(r.maxConc) : '0', r.fits ? `≈ ${fmtNum(r.maxUsers)} users at ${pct(wl.activity)} active · you asked for ${fmtNum(r.B)}` : 'model does not load', r.fits && r.maxConc >= r.B ? 'good' : 'bad', true, 'concurrent'),
+      tile('Context per session at your load', r.fits ? fmtTok(r.maxCtxAtLoad) : '—', `${fmtNum(r.sessionsPerRep)} sessions resident per replica · model max ${fmtTok(model.maxCtx)}`, r.maxCtxAtLoad >= wl.ctx ? 'good' : 'bad', false, 'ctx-at-load'),
+      tile('Speed per user', a ? fmtTokS(a.perUser) + ' tok/s' : '—', a ? `target ≥ ${wl.target} · ${fmtTime(a.itl)} between tokens` : '', a && a.perUser >= wl.target && !a.saturated ? 'good' : 'bad', false, 'speed-per-user'),
+      tile('Aggregate throughput', a ? fmtNum(r.aggTotal) + ' tok/s' : '—', r.costPerMTok != null ? `${fmtMoney(r.costPerMTok)} per 1M output tokens at ~${fmtMoney(r.price, 0)}/h` : (r.kW ? `${fmtNum(r.kW, 1)} kW of accelerators` : ''), null, false, 'aggregate'),
+      tile('Time to first token', a ? fmtTime(r.ttft) : '—', a ? `limit ${fmtTime(wl.ttftMax)} · first turn from cold: ${fmtTime(r.ttftCold)} for ${fmtTok(r.coldNew)} tokens` : '', a ? (r.ttftOK ? 'good' : 'bad') : null, false, 'ttft'),
+      tile('KV cache per session', fmtGB(r.kv.perSession), `${fmtGB(E.kvPerTokenFull(model, p.kvPrec))}/token · pool ${fmtGB(r.kvAvail)} per replica`, null, false, 'kv-per-session'),
     ];
     $('#kpis').replaceChildren(...tiles);
 
@@ -297,8 +333,8 @@
     renderLedger(r, p);
     renderWarnings(r);
   }
-  function tile(label, value, sub, status, hero) {
-    return h('div', { class: 'kpi' + (hero ? ' hero' : '') + (status ? ' ' + status : '') }, h('div', { class: 'l' }, label), h('div', { class: 'v' }, value), h('div', { class: 's' }, sub));
+  function tile(label, value, sub, status, hero, term) {
+    return h('div', { class: 'kpi' + (hero ? ' hero' : '') + (status ? ' ' + status : '') }, h('div', { class: 'l' }, term ? T(term, label) : label), h('div', { class: 'v' }, value), h('div', { class: 's' }, sub));
   }
   function verdictContent(r, p) {
     const wl = p.wl, model = r.model, layout = `${r.total}× ${r.hw.name}`;
@@ -338,20 +374,20 @@
   function configBody(r, p, tried) {
     const hw = r.hw, mem = hw.mem * 1e9;
     const wPer = r.W / r.G, kvPer = Math.max(0, r.kvAvailRaw / r.G), ovh = r.overhead, head = mem * (1 - p.adv.util);
-    const segs = [['Weights', wPer, 'var(--s1)'], ['KV cache pool', kvPer, 'var(--s3)'], ['Runtime overhead', ovh, 'var(--muted)'], ['Headroom (unused by the engine)', head, 'var(--line)']];
+    const segs = [['Weights', wPer, 'var(--s1)', 'weights-mem'], ['KV cache pool', kvPer, 'var(--s3)', 'kv-pool'], ['Runtime overhead', ovh, 'var(--muted)', 'overhead'], ['Headroom (unused by the engine)', head, 'var(--line)', 'headroom']];
     const bar = h('div', { class: 'membar', role: 'img', 'aria-label': `Memory per accelerator: weights ${fmtGB(wPer)}, KV cache ${fmtGB(kvPer)}, overhead ${fmtGB(ovh)}, headroom ${fmtGB(head)}` });
     for (const [name, val, color] of segs) if (val > 0) bar.append(h('div', { class: 'seg', style: `flex:${val};background:${color}`, title: `${name}: ${fmtGB(val)}` }));
-    const key = h('ul', { class: 'key' }, segs.map(([name, val, color]) => h('li', null, h('i', { style: `background:${color}` }), h('span', { class: 't' }, name), h('b', null, fmtGB(Math.max(0, val))))));
+    const key = h('ul', { class: 'key' }, segs.map(([name, val, color, term]) => h('li', null, h('i', { style: `background:${color}` }), h('span', { class: 't' }, T(term, name)), h('b', null, fmtGB(Math.max(0, val))))));
     const layoutTxt = `TP ${r.tp} × PP ${r.pp} × ${plural(r.R, 'replica')} = ${r.total} accelerators on ${plural(r.nodes, 'node')}` + (r.count - r.total > 0 ? `, ${r.count - r.total} idle` : '') + (r.pdTotal ? `, plus ${r.pdTotal} in a prefill pool` : '');
     const out = [
-      h('p', { class: 'lead' }, layoutTxt),
+      h('p', { class: 'lead' }, T('tp', 'TP'), ` ${r.tp} × `, T('pp', 'PP'), ` ${r.pp} × `, T('replicas', plural(r.R, 'replica')), layoutTxt.slice(layoutTxt.indexOf(' ='))),
       h('p', { class: 'hint' }, `Per accelerator (${hw.mem} GB): ${fmtGB(wPer)} weights, ${fmtGB(kvPer)} KV cache = ${fmtTok(kvPer / Math.max(1, E.kvPerTokenFull(r.model, p.kvPrec) / r.kvRepl))} tokens${r.kvRepl > 1 ? ` (KV replicated ${r.kvRepl}×)` : ''}. ${r.S > 0 ? `Shared prefix of ${fmtTok(r.S)} tokens stored once per replica (${fmtGB(r.kv.shared)}).` : ''}`),
       bar, key,
     ];
     if (tried && tried.length > 1) {
       const rows = tried.slice().sort((x, y) => (y.maxUsers - x.maxUsers) || ((y.at ? y.at.perUser : 0) - (x.at ? x.at.perUser : 0))).slice(0, 5);
       out.push(h('h4', null, 'Layouts considered'), table(
-        ['Layout', 'Concurrent', 'Users', 'tok/s per user', 'Context at load', 'Idle'],
+        [{ t: 'Layout', k: 'layout-col' }, { t: 'Concurrent', k: 'concurrent' }, 'Users', { t: 'tok/s per user', k: 'speed-per-user' }, { t: 'Context at load', k: 'ctx-at-load' }, 'Idle'],
         rows.map((t) => [`TP ${t.tp} × PP ${t.pp} × ${t.R}` + (t === r ? ' ◂' : ''), t.fits ? fmtNum(t.maxConc) : 'no fit', t.fits ? fmtNum(t.maxUsers) : '—', t.at ? fmtTokS(t.at.perUser) : '—', t.fits ? fmtTok(t.maxCtxAtLoad) : '—', fmtNum(t.count - t.total)]),
         { numeric: [1, 2, 3, 4, 5] }));
     }
@@ -363,20 +399,20 @@
     const eff = r.tp * r.hw.bw * 1e9 * p.adv.bwEff;
     const linkName = r.tpCross ? p.net.name : (LINKS[p.link] || LINKS.nvlink).name;
     const rows = [
-      ['Decode step', fmtTime(a.step), `${a.bound}-bound at ${fmtNum(r.bPerRep)} concurrent per replica`],
-      ['Memory traffic', fmtTime(a.tBw), `${fmtGB(a.wRead)} of weights + ${fmtGB(a.kvRead)} of KV cache per step at ${fmtGB(eff)}/s effective`],
-      ['Compute', fmtTime(a.tComp), `${r.pk.used} matmuls at ${pct(p.adv.mfu)} of ${fmtNum(r.pk.peak / 1e12)} TFLOPS × ${r.G}`],
-      ['Collectives', fmtTime(a.tComm), r.tp > 1 ? `${2 * r.model.layers} all-reduces per token over ${linkName}` : 'no tensor parallelism'],
-      ['Prefill share', pct(a.f) + (a.saturated ? ' (saturated)' : ''), `${a.lambda.toFixed(2)} requests/s per replica, ${fmtTok(r.warmNew)} new tokens each${p.opt.pd ? ' (in the prefill pool)' : ', interleaved with decode'}`],
-      ['Warm turn TTFT', fmtTime(r.ttftWarm), p.wl.retention === 'host' ? `includes ${fmtTime(r.restoreS)} to restore ${fmtGB(r.kv.perSession)} from host memory` : `${fmtTok(r.warmNew)} tokens prefilled`],
-      ['Cold TTFT', fmtTime(r.ttftCold), `${fmtTok(r.coldNew)} tokens prefilled on ${r.tp} accelerators`],
+      [T('decode-step', 'Decode step'), fmtTime(a.step), `${a.bound}-bound at ${fmtNum(r.bPerRep)} concurrent per replica`],
+      [T('mem-traffic', 'Memory traffic'), fmtTime(a.tBw), `${fmtGB(a.wRead)} of weights + ${fmtGB(a.kvRead)} of KV cache per step at ${fmtGB(eff)}/s effective`],
+      [T('compute', 'Compute'), fmtTime(a.tComp), `${r.pk.used} matmuls at ${pct(p.adv.mfu)} of ${fmtNum(r.pk.peak / 1e12)} TFLOPS × ${r.G}`],
+      [T('collectives', 'Collectives'), fmtTime(a.tComm), r.tp > 1 ? `${2 * r.model.layers} all-reduces per token over ${linkName}` : 'no tensor parallelism'],
+      [T('prefill-share', 'Prefill share'), pct(a.f) + (a.saturated ? ' (saturated)' : ''), `${a.lambda.toFixed(2)} requests/s per replica, ${fmtTok(r.warmNew)} new tokens each${p.opt.pd ? ' (in the prefill pool)' : ', interleaved with decode'}`],
+      [T('ttft', 'Warm turn TTFT'), fmtTime(r.ttftWarm), p.wl.retention === 'host' ? `includes ${fmtTime(r.restoreS)} to restore ${fmtGB(r.kv.perSession)} from host memory` : `${fmtTok(r.warmNew)} tokens prefilled`],
+      [T('ttft', 'Cold TTFT'), fmtTime(r.ttftCold), `${fmtTok(r.coldNew)} tokens prefilled on ${r.tp} accelerators`],
     ];
     return [table(['What', 'Time', 'Why'], rows, { numeric: [1] })];
   }
   function table(cols, rows, opts) {
     const numeric = new Set((opts && opts.numeric) || []);
     return h('div', { class: 'tw' }, h('table', { class: 'data' },
-      h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: numeric.has(i) ? 'n' : null }, c)))),
+      h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: numeric.has(i) ? 'n' : null }, typeof c === 'string' ? c : T(c.k, c.t))))),
       h('tbody', null, rows.map((row) => h('tr', { class: row.cls || null }, (row.cells || row).map((c, i) => h('td', { class: numeric.has(i) ? 'n' : 't' }, c)))))));
   }
 
@@ -503,19 +539,19 @@
     const el = $('#ledger');
     if (!base.fits) { el.replaceChildren(h('p', { class: 'hint' }, 'Once the model loads, this table compares the options that buy more concurrency or context.')); return; }
     const hw = p.hw, st = state;
-    const rows = [{ name: 'As configured', r: base, o: null, note: `${E.PREC_LABEL[st.wPrec]} weights, ${E.KV_LABEL[st.kvPrec]} KV${st.spec ? ', speculative decoding' : ''}${st.pd ? ', prefill/decode split' : ''}` }];
-    const add = (name, o, note) => rows.push({ name, r: run(o).best, o, note });
-    if (st.kvPrec === 'bf16') add('KV cache in FP8', { kvPrec: 'fp8' }, 'Half the KV bytes per token; usually no measurable quality loss' + (E.kvSupport(hw, 'fp8', st.engine || 'none') === 'supported' ? '' : `; not offered by ${ENGINES[st.engine || 'none'].name} here`));
-    if (st.kvPrec !== 'int4') add('KV cache in INT4', { kvPrec: 'int4' }, 'A quarter of the KV bytes; quality risk grows with context' + (E.kvSupport(hw, 'int4', st.engine || 'none') === 'supported' ? '' : `; not offered by ${ENGINES[st.engine || 'none'].name} (LMDeploy has it)`));
+    const rows = [{ name: 'As configured', term: null, r: base, o: null, note: `${E.PREC_LABEL[st.wPrec]} weights, ${E.KV_LABEL[st.kvPrec]} KV${st.spec ? ', speculative decoding' : ''}${st.pd ? ', prefill/decode split' : ''}` }];
+    const add = (name, o, note, term) => rows.push({ name, term, r: run(o).best, o, note });
+    if (st.kvPrec === 'bf16') add('KV cache in FP8', { kvPrec: 'fp8' }, 'Half the KV bytes per token; usually no measurable quality loss' + (E.kvSupport(hw, 'fp8', st.engine || 'none') === 'supported' ? '' : `; not offered by ${ENGINES[st.engine || 'none'].name} here`), 'opt-kv-fp8');
+    if (st.kvPrec !== 'int4') add('KV cache in INT4', { kvPrec: 'int4' }, 'A quarter of the KV bytes; quality risk grows with context' + (E.kvSupport(hw, 'int4', st.engine || 'none') === 'supported' ? '' : `; not offered by ${ENGINES[st.engine || 'none'].name} (LMDeploy has it)`), 'opt-kv-int4');
     const model = E.norm(p.model);
     const ckpt = (prec) => { const c = checkpointFor(model, prec); return c ? `; checkpoint: ${c.org} (${c.kind})` : '; no known checkpoint'; };
-    if (st.wPrec === 'bf16') add('Weights in FP8', { wPrec: 'fp8' }, (E.formatSupport(hw, 'fp8', st.engine || 'none') === 'native' ? 'Native FP8 here: halves weight bytes and speeds up decode' : 'Weight-only on this accelerator: saves memory, compute stays BF16') + ckpt('fp8'));
-    if (!['int4', 'fp4'].includes(st.wPrec)) { const f4 = E.formatSupport(hw, 'fp4', st.engine || 'none') === 'native'; add(f4 ? 'Weights in FP4 (NVFP4)' : 'Weights in INT4 (AWQ / GPTQ)', { wPrec: f4 ? 'fp4' : 'int4' }, (f4 ? 'Native FP4: a quarter of the weight bytes and faster prefill' : 'Weight-only 4-bit: a quarter of the weight bytes, compute stays BF16') + ckpt(f4 ? 'fp4' : 'int4')); }
-    if (!st.prefixCache && st.prefix > 0) add('Cache the shared prefix', { prefixCache: true }, `The ${fmtTok(st.prefix)}-token shared prefix is stored once per replica`);
-    if (!st.spec) add('Speculative decoding', { spec: true }, `Draft ${st.specK} tokens per step at ${st.specAlpha}% acceptance; helps when memory-bound`);
-    if (st.retention === 'gpu') add('Park idle sessions in host memory', { retention: 'host' }, 'GPU memory holds only in-flight requests; idle KV restores over PCIe');
-    if (st.retention === 'none') add('Keep idle sessions in host memory', { retention: 'host' }, 'Skips re-prefilling the whole conversation on every turn');
-    if (!st.pd) add('Disaggregate prefill from decode', { pd: true }, 'A separate prefill pool keeps token speed steady; needs KV transfer over the network');
+    if (st.wPrec === 'bf16') add('Weights in FP8', { wPrec: 'fp8' }, (E.formatSupport(hw, 'fp8', st.engine || 'none') === 'native' ? 'Native FP8 here: halves weight bytes and speeds up decode' : 'Weight-only on this accelerator: saves memory, compute stays BF16') + ckpt('fp8'), 'opt-w-fp8');
+    if (!['int4', 'fp4'].includes(st.wPrec)) { const f4 = E.formatSupport(hw, 'fp4', st.engine || 'none') === 'native'; add(f4 ? 'Weights in FP4 (NVFP4)' : 'Weights in INT4 (AWQ / GPTQ)', { wPrec: f4 ? 'fp4' : 'int4' }, (f4 ? 'Native FP4: a quarter of the weight bytes and faster prefill' : 'Weight-only 4-bit: a quarter of the weight bytes, compute stays BF16') + ckpt(f4 ? 'fp4' : 'int4'), 'opt-w-4bit'); }
+    if (!st.prefixCache && st.prefix > 0) add('Cache the shared prefix', { prefixCache: true }, `The ${fmtTok(st.prefix)}-token shared prefix is stored once per replica`, 'prefix-caching');
+    if (!st.spec) add('Speculative decoding', { spec: true }, `Draft ${st.specK} tokens per step at ${st.specAlpha}% acceptance; helps when memory-bound`, 'spec');
+    if (st.retention === 'gpu') add('Park idle sessions in host memory', { retention: 'host' }, 'GPU memory holds only in-flight requests; idle KV restores over PCIe', 'opt-host');
+    if (st.retention === 'none') add('Keep idle sessions in host memory', { retention: 'host' }, 'Skips re-prefilling the whole conversation on every turn', 'opt-host');
+    if (!st.pd) add('Disaggregate prefill from decode', { pd: true }, 'A separate prefill pool keeps token speed steady; needs KV transfer over the network', 'pd');
     const combo = {};
     if (st.kvPrec === 'bf16') combo.kvPrec = 'fp8';
     if (st.wPrec === 'bf16') combo.wPrec = E.formatSupport(hw, 'fp8', st.engine || 'none') === 'native' ? 'fp8' : 'int4';
@@ -530,7 +566,7 @@
       return {
         cls: row.r === base ? 'base' : null,
         cells: [
-          h('div', null, h('b', null, row.name), h('div', { class: 'note' }, row.note)),
+          h('div', null, h('b', null, row.term ? T(row.term, row.name) : row.name), h('div', { class: 'note' }, row.note)),
           r.fits ? h('span', null, fmtNum(r.maxConc), delta(r.maxConc, b.maxConc)) : '0',
           r.fits ? fmtNum(r.maxUsers) : '0',
           r.fits ? h('span', null, fmtTok(r.maxCtxAtLoad), delta(r.maxCtxAtLoad, b.maxCtxAtLoad)) : '—',
@@ -542,7 +578,7 @@
         ],
       };
     });
-    el.replaceChildren(table(['Option', 'Concurrent', 'Users', 'Context at load', 'tok/s per user', 'TTFT', '$ / 1M tok', 'Verdict', ''], cells, { numeric: [1, 2, 3, 4, 5, 6] }));
+    el.replaceChildren(table(['Option', { t: 'Concurrent', k: 'concurrent' }, 'Users', { t: 'Context at load', k: 'ctx-at-load' }, { t: 'tok/s per user', k: 'speed-per-user' }, { t: 'TTFT', k: 'ttft' }, { t: '$ / 1M tok', k: 'cost-token' }, 'Verdict', ''], cells, { numeric: [1, 2, 3, 4, 5, 6] }));
   }
   function renderWarnings(r) {
     const el = $('#warnings');
@@ -568,8 +604,8 @@
     const perTok = feasible.filter((r) => r.costPerMTok != null).sort((a, b) => a.costPerMTok - b.costPerMTok)[0];
     const sum = [];
     if (fewest) sum.push(tile('Fewest accelerators', `${fewest.gpusUsed}× ${fewest.hw.name}`, `${plural(fewest.nodes, 'node')} · ${fmtTokS(fewest.at.perUser)} tok/s per user`, 'good', true));
-    if (cheapest) sum.push(tile('Lowest hourly cost', `${fmtMoney(cheapest.price, 0)}/h`, `${cheapest.gpusUsed}× ${cheapest.hw.name}`));
-    if (perTok) sum.push(tile('Lowest cost per token', `${fmtMoney(perTok.costPerMTok)} / 1M`, `${perTok.gpusUsed}× ${perTok.hw.name} at ${fmtNum(perTok.aggTotal)} tok/s`));
+    if (cheapest) sum.push(tile('Lowest hourly cost', `${fmtMoney(cheapest.price, 0)}/h`, `${cheapest.gpusUsed}× ${cheapest.hw.name}`, null, false, 'cost-hour'));
+    if (perTok) sum.push(tile('Lowest cost per token', `${fmtMoney(perTok.costPerMTok)} / 1M`, `${perTok.gpusUsed}× ${perTok.hw.name} at ${fmtNum(perTok.aggTotal)} tok/s`, null, false, 'cost-token'));
     if (!feasible.length) sum.push(tile('No candidate works', '—', 'see the reasons below', 'bad', true));
     $('#revSummary').replaceChildren(...sum);
     const rows = results.map((r) => r.infeasible
@@ -580,7 +616,7 @@
         fmtTokS(r.at.perUser), fmtTime(r.ttft), fmtGB(r.kvAvail * r.R), r.price != null ? fmtMoney(r.price, 0) : '—', r.costPerMTok != null ? fmtMoney(r.costPerMTok) : '—', r.kW != null ? fmtNum(r.kW, 1) : '—',
         h('button', { class: 'ghost', type: 'button', onclick: () => openInPlanner(r) }, 'Open'),
       ] });
-    $('#revTable').replaceChildren(table(['Accelerator', 'Count', 'Nodes', 'Layout', 'tok/s per user', 'TTFT', 'KV pool', '$ / hour', '$ / 1M tok', 'kW', ''], rows, { numeric: [1, 2, 4, 5, 6, 7, 8, 9] }));
+    $('#revTable').replaceChildren(table([{ t: 'Accelerator', k: 'accelerator' }, 'Count', { t: 'Nodes', k: 'nodes' }, { t: 'Layout', k: 'layout-col' }, { t: 'tok/s per user', k: 'speed-per-user' }, { t: 'TTFT', k: 'ttft' }, { t: 'KV pool', k: 'kv-pool' }, { t: '$ / hour', k: 'cost-hour' }, { t: '$ / 1M tok', k: 'cost-token' }, { t: 'kW', k: 'kw' }, ''], rows, { numeric: [1, 2, 4, 5, 6, 7, 8, 9] }));
   }
   function openInPlanner(r) {
     Object.assign(state, { mode: 'forward', hw: r.hw.id, count: r.total, nodeGpus: r.hw.nodeGpus, link: 'auto', par: 'manual', tp: r.tp, pp: r.pp, reps: r.R });
@@ -604,7 +640,7 @@
       h('li', null, h('b', { class: 'sample none' }, '✕'), h('span', null, `${E.PREC_LABEL[p.wPrec]} weights are not loadable on that chip generation (no kernel)`)),
       h('li', null, h('b', { class: 'sample' }, 'KV/token'), h('span', null, `bytes of KV cache one token costs in ${E.KV_LABEL[p.kvPrec]}; multiply by the context to size a session`)),
     );
-    const head = h('tr', null, h('th', { class: 'sticky' }, 'Model'), h('th', { class: 'n' }, 'KV/token'), hws.map((hw) => h('th', { class: 'n rot' }, h('span', null, hw.name))));
+    const head = h('tr', null, h('th', { class: 'sticky' }, 'Model'), h('th', { class: 'n' }, T('kv-per-token', 'KV/token')), hws.map((hw) => h('th', { class: 'n rot' }, h('span', null, hw.name))));
     const body = models.map((m0) => {
       const m = E.norm(m0);
       return h('tr', null, h('td', { class: 't sticky' }, m.name), h('td', { class: 'n' }, fmtGB(E.kvPerTokenFull(m, p.kvPrec))), hws.map((hw) => {
@@ -624,7 +660,7 @@
       `${(LINKS[hw.link] || LINKS.none).name}${hw.linkBw ? ' ' + fmtNum(hw.linkBw) + ' GB/s' : ''}`, fmtNum(hw.nodeGpus), hw.tdp != null ? fmtNum(hw.tdp) : '—', hw.price != null ? fmtMoney(hw.price) : '—',
       ARCHS[hw.arch] ? ARCHS[hw.arch].name : '—', ARCHS[hw.arch] ? ARCHS[hw.arch].native.map((x) => x.toUpperCase()).join(' ') : '—', ARCHS[hw.arch] ? ARCHS[hw.arch].weightOnly.map((x) => x.toUpperCase()).join(' ') : '—',
     ]);
-    $('#catHardware').replaceChildren(table(['Accelerator', 'Vendor', 'Memory GB', 'GB/s', 'BF16 TFLOPS', 'FP8', 'FP4', 'Fabric', 'Per node', 'W', '$/h', 'Generation', 'Native formats', 'Weight-only'], hwRows, { numeric: [2, 3, 4, 5, 6, 8, 9, 10] }));
+    $('#catHardware').replaceChildren(table([{ t: 'Accelerator', k: 'accelerator' }, 'Vendor', { t: 'Memory GB', k: 'mem-gb' }, { t: 'GB/s', k: 'bw' }, { t: 'BF16 TFLOPS', k: 'tflops-bf16' }, { t: 'FP8', k: 'tflops-fp8' }, { t: 'FP4', k: 'tflops-fp4' }, { t: 'Fabric', k: 'fabric' }, { t: 'Per node', k: 'per-node' }, { t: 'W', k: 'tdp' }, { t: '$/h', k: 'price' }, { t: 'Generation', k: 'generation' }, { t: 'Native formats', k: 'native-fmt' }, { t: 'Weight-only', k: 'weight-only' }], hwRows, { numeric: [2, 3, 4, 5, 6, 8, 9, 10] }));
     const fams = ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'gaudi', 'tpu', 'other'];
     const engRows = [];
     for (const [k, e] of Object.entries(ENGINES)) {
@@ -640,7 +676,7 @@
       const arch = m.attn.map((l) => `${l.n}× ${l.type}${l.window ? ' ' + fmtTok(l.window) : ''}`).join(' + ') + (m.sparse ? ` · sparse top-${m.sparse.topk}` : '');
       return [h('b', null, m.name + (m.approx ? ' ~' : '')), m.family, fmtNum(m.params, 1), m.moe ? fmtNum(m.active, 1) : '—', fmtNum(m.layers), `${m.nHeads} / ${m.attn.some((l) => l.type === 'mla') ? 'MLA' : m.nKv}`, fmtGB(E.kvPerTokenFull(m, 'bf16')), fmtGB(E.kvAtCtx(m, 'bf16', 1e6)), fmtTok(m.maxCtx) + (m.nativeCtx && m.nativeCtx < m.maxCtx ? ` (${fmtTok(m.nativeCtx)} native)` : ''), arch, m.nativePrec ? m.nativePrec.toUpperCase() : '—', m.hf ? h('a', { href: 'https://huggingface.co/' + m.hf, target: '_blank', rel: 'noopener' }, m.hf) : '—', m.variants ? h('span', null, ...Object.entries(m.variants).map(([k, r]) => h('span', { class: 'vlink' }, h('a', { href: 'https://huggingface.co/' + r, target: '_blank', rel: 'noopener', title: r }, k.toUpperCase()), ' '))) : '—'];
     });
-    $('#catModels').replaceChildren(table(['Model', 'Family', 'Params B', 'Active B', 'Layers', 'Heads / KV heads', 'KV per token (BF16)', 'KV per 1M-token session', 'Max context', 'Attention layers', 'Ships in', 'Verified against', 'Known checkpoints'], mRows, { numeric: [2, 3, 4, 5, 6, 7, 8] }));
+    $('#catModels').replaceChildren(table([{ t: 'Model', k: 'model' }, 'Family', { t: 'Params B', k: 'params' }, { t: 'Active B', k: 'active' }, { t: 'Layers', k: 'layers' }, { t: 'Heads / KV heads', k: 'heads' }, { t: 'KV per token (BF16)', k: 'kv-per-token' }, { t: 'KV per 1M-token session', k: 'kv-1m' }, { t: 'Max context', k: 'max-ctx' }, { t: 'Attention layers', k: 'attn-layers' }, { t: 'Ships in', k: 'ships-in' }, { t: 'Verified against', k: 'verified' }, { t: 'Known checkpoints', k: 'checkpoints' }], mRows, { numeric: [2, 3, 4, 5, 6, 7, 8] }));
   }
 
   /* ---------- boot ---------- */
@@ -648,6 +684,8 @@
     populateSelects();
     bindInputs();
     syncInputs();
+    initTooltips();
+    renderGlossary();
     render();
   }
   const start = (data) => {
