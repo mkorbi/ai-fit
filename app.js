@@ -1,4 +1,4 @@
-/* app.js — UI for Context Budget. Depends on catalog.js and engine.js (classic scripts, loaded before this one). */
+/* app.js — UI for AI Fit. Depends on catalog.js and engine.js (classic scripts, loaded before this one). */
 (() => {
   'use strict';
   const E = Engine;

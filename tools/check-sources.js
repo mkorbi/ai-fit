@@ -5,7 +5,7 @@
  */
 const path = require('path');
 const { HARDWARE } = require(path.join(__dirname, '..', 'catalog.js'));
-const UA = { 'User-Agent': 'Mozilla/5.0 (Macintosh) context-budget-source-check' };
+const UA = { 'User-Agent': 'Mozilla/5.0 (Macintosh) ai-fit-source-check' };
 const cache = new Map();
 async function pageText(url) {
   if (cache.has(url)) return cache.get(url);

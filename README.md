@@ -1,4 +1,4 @@
-# Context Budget
+# AI Fit
 
 Live: https://mkorbi.github.io/ai-fit/ (GitHub Pages) · source: https://github.com/mkorbi/ai-fit
 

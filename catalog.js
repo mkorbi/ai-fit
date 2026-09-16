@@ -1,4 +1,4 @@
-/* catalog.js — hardware and model catalogs for Context Budget.
+/* catalog.js — hardware and model catalogs for AI Fit.
  *
  * Units
  *   mem      GB (decimal, 1e9 bytes) of accelerator memory

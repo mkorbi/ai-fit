@@ -1,4 +1,4 @@
-/* engine.js — capacity model for Context Budget.
+/* engine.js — capacity model for AI Fit.
  * Pure functions, no DOM. Works in the browser (globals) and in node (module.exports).
  *
  * The model is a roofline estimate, not a simulator:
