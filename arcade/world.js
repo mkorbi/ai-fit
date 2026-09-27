@@ -64,7 +64,7 @@ const ArcadeWorld = (() => {
       if (dev) { W = dev.inlineSize; H = dev.blockSize; }
       else { W = Math.round(box.clientWidth * dpr); H = Math.round(box.clientHeight * dpr); }   // inside the frame's border
       if (W < 50 || H < 50) return;
-      scale = Math.max(2, Math.min(8, Math.floor(H / 150)));
+      scale = Math.max(2, Math.min(8, Math.floor(Math.min(H / 150, W / 280))));   // at least 280 logical pixels wide, also on 4:3
       lw = Math.floor(W / scale); lh = Math.floor(H / scale);
       canvas.width = lw; canvas.height = lh;
       canvas.style.width = (lw * scale / dpr) + 'px';
@@ -238,27 +238,39 @@ const ArcadeWorld = (() => {
       if (!/\d+(\.\d+)?B\b/i.test(base)) { const m = name.match(/(\d+(?:\.\d+)?B(?:-A\d+B)?)\b/); base += ' ' + (m ? m[1] : params >= 1000 ? (params / 1000).toFixed(1).replace(/\.0$/, '') + 'T' : Math.round(params) + 'B'); }
       return base.replace(/\s*\(.*?\)/g, '');
     }
+    // the longest candidate that fits in maxW pixels, else the last one cut short
+    function fitText(candidates, maxW) {
+      const t = candidates.find((c) => S.textWidth(c) <= maxW);
+      if (t != null) return t;
+      const last = candidates[candidates.length - 1];
+      return last.slice(0, Math.max(0, Math.floor((maxW + 1) / S.ADVANCE)));
+    }
     function drawSign() {
       const name = modelSign(vm.model.name, vm.model.params).toUpperCase();
-      const w = name.length * 8 - 2;
-      const x = Math.max(3, Math.floor((L.server.w - w) / 2) + L.server.x);
-      const y = 2;
-      const glow = pal.signGlow;
-      for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) text2x(name, x + ox, y + oy, glow);
-      text2x(name, x, y, pal.sign);
-      const eng = vm.engine.name.toUpperCase();
-      S.text(ctx, eng, lw - S.textWidth(eng) - 3, 5, pal.sign2);
+      const eng = vm.engine.name.toUpperCase(), engX = lw - S.textWidth(eng) - 3;
+      S.text(ctx, eng, engX, 5, pal.sign2);
+      let x = 3, w = name.length * 8 - 2;
+      if (w <= engX - 9) {                                 // the big neon sign, centred over the server room when there is room
+        x = Math.min(engX - 6 - w, Math.max(3, Math.floor((L.server.w - w) / 2) + L.server.x));
+        for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) text2x(name, x + ox, 2 + oy, pal.signGlow);
+        text2x(name, x, 2, pal.sign);
+      } else {                                             // a narrow stage: the name in small letters
+        const small = fitText([name], engX - 9);
+        w = S.textWidth(small);
+        S.text(ctx, small, x, 5, pal.sign);
+      }
       // how many users one pixel person stands for, left of the engine name (shorter when the model name is long)
       if (sprites.per > 1) {
-        const n = M.fmtCount(sprites.per), right = lw - S.textWidth(eng) - 12;
+        const n = M.fmtCount(sprites.per), right = engX - 9;
         const t = [`1 PERSON = ${n} USERS`, `1 = ${n} USERS`].find((c) => right - S.textWidth(c) > x + w + 6);
         if (t) S.text(ctx, t, right - S.textWidth(t), 5, pal.ink2);
       }
     }
     function drawZoneLabels() {
       const c = vm.cluster;
-      const gpuTxt = `${c.total > 0 ? c.total : c.count} × ${shortHw(c.hwName)}` + (c.servers ? `  ${c.R} SERVER${c.R === 1 ? '' : 'S'}` : c.R > 1 ? `  ${c.R} REPLICAS` : '');
-      S.text(ctx, gpuTxt, L.server.x + 2, L.server.y + 1, pal.ink2);
+      const gpus = `${c.total > 0 ? c.total : c.count} × ${shortHw(c.hwName)}`;
+      const units = c.servers ? `${c.R} SERVER${c.R === 1 ? '' : 'S'}` : c.R > 1 ? `${c.R} REPLICAS` : '';
+      S.text(ctx, fitText(units ? [`${gpus}  ${units}`, gpus] : [gpus], L.server.w - 4), L.server.x + 2, L.server.y + 1, pal.ink2);
       S.text(ctx, 'SERVED', L.office.x + 1, L.office.y + 1, pal.ink2);
       S.text(ctx, 'IDLE', L.lounge.area.x, L.lounge.area.y - 7, pal.ink2);
       S.text(ctx, 'WAITING', L.street.x + 2, L.street.y + 1, pal.ink2);

@@ -43,6 +43,10 @@
     return base;
   }
   const hwShort = (hw) => hw.name.replace(/^(GeForce|Instinct|Mac Studio)\s+/i, '').replace(/\s*\(.*?\)/g, '').replace(/, per GPU,?/i, '').replace(/\s+unified$/i, '');
+  const hwBrief = (hw) => hwShort(hw).replace(/\s+\d+\s*GB$/i, '');
+  // compact names for the deck's value boxes; the sign and the top line carry the full ones
+  const deckModel = (m) => modelShort(m).replace(/-\d+E\b/, '').replace(/-A\d+(\.\d+)?B\b/, '');
+  const deckHw = (hw) => hwShort(hw).replace(/\s+(Blackwell|Trillium|Ironwood)\b/i, '').replace(/\s+GB$/i, 'GB');
   const engName = (id) => (id === 'none' ? 'Ideal' : (ENGINES[id] || {}).name || id);
   const shortPrec = (label) => label.split(' ')[0];
   const fmtTok = E.fmtTok;
@@ -217,7 +221,7 @@
     // GPUs
     const c = vm.cluster;
     countTo($('tGpusV'), c.gpusUsed, (v) => M.fmtCount(Math.round(v)));
-    $('tGpusU').textContent = ' × ' + hwShort(C.store.hwById(st.hw)).replace(/\s+\d+\s*GB$/i, '');
+    $('tGpusU').textContent = ' × ' + hwBrief(C.store.hwById(st.hw));
     const split = c.split === 'layer' ? (c.pp > 1 ? `layer split ${c.pp}` : '') : c.tp > 1 || c.pp > 1 ? `TP${c.tp}${c.pp > 1 ? ' PP' + c.pp : ''}` : '';
     const units = c.servers ? `${c.R} server${c.R === 1 ? '' : 's'}` : split ? `${split} × ${c.R}` : `${c.R} replica${c.R === 1 ? '' : 's'}`;
     const kw = vm.money.kW != null ? `${vm.money.kW < 10 ? vm.money.kW.toFixed(1) : Math.round(vm.money.kW)} kW` : '';
@@ -232,7 +236,7 @@
     const n = vm.need;
     const who = `${M.fmtCount(st.users)} user${st.users === 1 ? '' : 's'}`;
     $('needL').textContent = st.autoBuild ? (n && n.feasible ? 'Auto-built for ' : 'Cannot build for ') + who : `Need for ${who}`;
-    $('needV').textContent = n && n.feasible ? `${M.fmtCount(n.gpus)} × ${hwShort(C.store.hwById(st.hw)).replace(/\s+\d+\s*GB$/i, '').toUpperCase()}` : 'NO FIT';
+    $('needV').textContent = n && n.feasible ? `${M.fmtCount(n.gpus)} × ${hwBrief(C.store.hwById(st.hw)).toUpperCase()}` : 'NO FIT';
     $('need').title = n && !n.feasible ? n.reason : '';
     $('limitV').textContent = vm.limit.label.toUpperCase();
     renderTop();
@@ -242,7 +246,7 @@
   function renderTop() {
     const m = C.store.modelById(st.model), hw = C.store.hwById(st.hw);
     const count = st.autoBuild && vm.need && vm.need.feasible ? vm.need.gpus : st.count;
-    $('cfg').replaceChildren(h('em', null, modelShort(m)), ` · ${shortPrec(E.precLabel(st.wPrec, st.engine))} / KV ${shortPrec(E.kvLabel(st.kvPrec, st.engine))} · `, h('em', null, `${count}× ${hwShort(hw)}`), ` · ${engName(st.engine)} · ${fmtTok(st.ctx)} ctx · ${M.fmtCount(st.users)} user${st.users === 1 ? '' : 's'}`);
+    $('cfg').replaceChildren(h('em', null, modelShort(m)), ` · ${shortPrec(E.precLabel(st.wPrec, st.engine))} / KV ${shortPrec(E.kvLabel(st.kvPrec, st.engine))} · `, h('em', null, `${count}× ${hwBrief(hw)}`), ` · ${engName(st.engine)} · ${fmtTok(st.ctx)} ctx · ${M.fmtCount(st.users)} user${st.users === 1 ? '' : 's'}`);
     const chip = $('sceneChip');
     chip.hidden = sceneIndex == null;
     if (sceneIndex != null) { chip.textContent = `Scene ${sceneIndex + 1}/9`; chip.title = scenes()[sceneIndex].name; }
@@ -343,9 +347,24 @@
     fillSelects();
   }
   function fillSelects() {
-    D.model.replaceChildren(...models().map((m) => h('option', { value: m.id }, modelShort(m).toUpperCase())));
-    D.hw.replaceChildren(...hardware().map((x) => h('option', { value: x.id }, hwShort(x).toUpperCase())));
+    D.model.replaceChildren(...models().map((m) => h('option', { value: m.id }, deckModel(m).toUpperCase())));
+    D.hw.replaceChildren(...hardware().map((x) => h('option', { value: x.id }, deckHw(x).toUpperCase())));
   }
+  /* A deck value in the pixel font steps down in 4px sizes until it fits its box, and switches to the narrower text font
+   * when even 8px is too wide (small screens). */
+  const measure = document.createElement('canvas').getContext('2d');
+  function fitVal(el) {
+    el.style.fontSize = ''; el.classList.remove('narrow');
+    const text = el.tagName === 'SELECT' ? (el.options[el.selectedIndex] || {}).text || '' : el.textContent;
+    const cs = getComputedStyle(el), avail = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), base = parseFloat(cs.fontSize);
+    if (!(avail > 0)) return;
+    for (let px = base; px >= 8; px -= 4) {
+      measure.font = `${px}px ${cs.fontFamily}`;
+      if (measure.measureText(text).width <= avail) { if (px !== base) el.style.fontSize = px + 'px'; return; }
+    }
+    el.classList.add('narrow');
+  }
+  const fitDeck = () => { for (const el of [D.model, D.hw, D.engine]) fitVal(el); };
   function renderDeck() {
     const hw = C.store.hwById(st.hw), eng = st.engine, sv = E.servingOf(eng), ename = engName(eng);
     D.model.value = st.model; D.hw.value = st.hw;
@@ -387,6 +406,7 @@
       b.classList.toggle('na', !ok);
       b.title = b.dataset.name + (ok ? '' : k === 'prefixCache' && sv.prefixCache === 'per-slot' ? `: ${ename} reuses a prompt prefix within each slot only` : `: not in ${ename}`);
     }
+    fitDeck();
   }
 
   /* ---------- top bar tools ---------- */
@@ -402,7 +422,7 @@
 
   /* ---------- baseline, undo, scenes ---------- */
   function baselineName() { return sceneIndex != null ? scenes()[sceneIndex].name : `${modelShort(C.store.modelById(st.model))} · ${vm.cluster.gpusUsed}× ${hwShort(C.store.hwById(st.hw))} · ${engName(st.engine)}`; }
-  const baselineShort = () => (sceneIndex != null ? `Scene ${sceneIndex + 1}` : `${vm.cluster.gpusUsed}× ${hwShort(C.store.hwById(st.hw)).replace(/\s+\d+\s*GB$/i, '')}, ${engName(st.engine)}`);
+  const baselineShort = () => (sceneIndex != null ? `Scene ${sceneIndex + 1}` : `${vm.cluster.gpusUsed}× ${hwBrief(C.store.hwById(st.hw))}, ${engName(st.engine)}`);
   function pin() { baseline = { state: snapshot(), vm: JSON.parse(JSON.stringify(vm)), name: baselineName(), short: baselineShort() }; LS.set('cb.arcade.baseline', baseline); render(); tick(`Baseline pinned: ${baseline.name}. Every number now shows its change.`, 'neutral'); Sfx.play('coin'); }
   function clearBaseline() { baseline = null; LS.del('cb.arcade.baseline'); render(); tick('Baseline cleared.', 'neutral'); }
   function swap() {
@@ -572,7 +592,8 @@
   $('scenesReset').addEventListener('click', () => { userScenes = {}; LS.del('cb.arcade.scenes'); showScenes(true); renderTop(); $('scenesMsg').textContent = 'Back to the built-in scenes.'; });
   $('scenesClose').addEventListener('click', () => showScenes(false));
   document.addEventListener('mousemove', wakeCursor);
-  window.addEventListener('resize', () => world.resize());
+  window.addEventListener('resize', () => { world.resize(); fitDeck(); });
+  if (document.fonts) document.fonts.ready.then(fitDeck);
   document.addEventListener('fullscreenchange', () => { wakeCursor(); const b = $('tFull'); if (b) b.setAttribute('aria-pressed', String(!!document.fullscreenElement)); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
   keepAwake();

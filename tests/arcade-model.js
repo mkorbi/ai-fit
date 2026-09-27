@@ -100,8 +100,8 @@ console.log('Sprites');
 console.log('Layout');
 {
   let ok = true;
-  // the world picks an integer scale so the canvas is 150 to 299 art pixels tall, at any width a 16:9 or 16:10 stage gives it
-  for (const [w, h] of [[240, 150], [260, 150], [295, 175], [329, 170], [340, 190], [360, 230], [440, 235], [520, 299]]) {
+  // the world picks an integer scale so the canvas is 150 to 299 art pixels tall and about 280 wide or more: 16:9, 16:10 and 4:3 stages
+  for (const [w, h] of [[240, 150], [260, 150], [295, 175], [329, 170], [340, 190], [360, 230], [440, 235], [520, 299], [273, 216], [280, 221], [291, 246], [350, 276]]) {
     const L = M.layout(w, h);
     const inside = (r) => r.x >= 0 && r.y >= 0 && r.x + r.w <= w && r.y + r.h <= h;
     const zones = [L.server, L.office, L.street];
@@ -110,7 +110,7 @@ console.log('Layout');
     const enough = L.desks.slots.length >= 20 && L.lounge.slots.length >= 10 && L.queue.slots.length >= 12;
     if (!(zones.every(inside) && apart && slotsIn(L.desks, M.DESK) && slotsIn(L.lounge, M.STAND) && slotsIn(L.queue, M.STAND) && enough)) { ok = false; console.log('    ', w, h, L.desks.slots.length, L.lounge.slots.length, L.queue.slots.length); }
   }
-  check('zones and person slots stay inside the canvas without overlapping (240×150 to 520×299)', ok);
+  check('zones and person slots stay inside the canvas without overlapping (240×150 to 520×299, 4:3 included)', ok);
 }
 
 console.log('Baseline and ticker');
