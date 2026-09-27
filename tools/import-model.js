@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* import-model.js — derive or verify catalog model entries from Hugging Face config.json.
+/* import-model.js - derive or verify catalog model entries from Hugging Face config.json.
  *
  *   node tools/import-model.js Qwen/Qwen3-32B              print a catalog entry for a repo
  *   node tools/import-model.js --check [id ...]            compare catalog entries (those with an `hf` field) with upstream
@@ -280,7 +280,7 @@ async function mainOrig() {
     for (const entry of entries) {
       let fetched;
       try { fetched = await fetchWithMirror(entry); }
-      catch (e) { skipped++; console.log(`\n## ${entry.name} [${entry.id}]  —  SKIPPED: ${e.message}`); continue; }
+      catch (e) { skipped++; console.log(`\n## ${entry.name} [${entry.id}]  -  SKIPPED: ${e.message}`); continue; }
       const up = mapConfig(fetched.config);
       const rows = compare(entry, up, fetched.info, fetched.config, fetched.mirror);
       const mism = rows.filter((r) => r[3] === 'MISMATCH').length; bad += mism > 0 ? 1 : 0;

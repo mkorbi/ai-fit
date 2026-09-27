@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* anchors.js — calibration anchors: published facts the model must reproduce.
+/* anchors.js - calibration anchors: published facts the model must reproduce.
  *   node tests/anchors.js
  * Two kinds: "fit" anchors (a vendor or engine statement that a model loads on N accelerators) and "measured" anchors
  * (numbers from engine logs or benchmarks, with a tolerance). Add your own measurements from `vllm bench serve` or

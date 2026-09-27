@@ -45,6 +45,7 @@
   --chart-surface: #1a1a19; --grid: #2c2c2a; --axis: #383835; --chart-muted: #898781;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45; padding-inline: clamp(16px, 3vw, 40px); padding-block: 0 56px; }
 h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 600; margin: 0; text-wrap: balance; }
 p { margin: 0; }
@@ -56,12 +57,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* masthead */
 .mast { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 28px; padding-block: 18px 0; border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; }
-.brand h1 { font-size: 26px; letter-spacing: 0.01em; }
+.brand h1 { font-size: 26px; letter-spacing: 0.01em; white-space: nowrap; }
 .brand .sub { color: var(--muted); font-size: 13px; }
-.tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-left: auto; }
+.nav-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 2px 6px; margin-left: auto; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; }
 .tab { border: 0; background: transparent; padding: 10px 12px 12px; font-family: var(--font-display); font-weight: 600; font-size: 15px; letter-spacing: 0.01em; color: var(--ink-2); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tab:hover { color: var(--ink); }
 .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.arcade-link { align-self: center; margin: 0 0 8px 0; font-family: var(--font-display); font-weight: 600; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 12px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.arcade-link:hover, .arcade-link:focus-visible { background: var(--accent); color: var(--accent-ink); }
 
 /* two-pane plan */
 .plan { display: grid; grid-template-columns: minmax(280px, 330px) minmax(0, 1fr); gap: 28px; padding-top: 22px; }
@@ -69,7 +73,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 @media (max-width: 900px) { .plan { grid-template-columns: minmax(0, 1fr); gap: 20px; } .rail { position: static !important; max-height: none !important; } }
 .rail { position: sticky; top: 0; align-self: start; max-height: 100vh; overflow: auto; padding-right: 4px; scrollbar-width: thin; }
 .group { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
-.group > legend { font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 0; margin-bottom: 6px; }
+.group > legend, details.group > summary { font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 0; margin-bottom: 6px; }
 .field { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; padding: 4px 0; }
 .field label { font-size: 13px; color: var(--ink-2); }
 .field input, .field select { font-family: var(--font-mono); font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); width: 10.5em; max-width: 100%; }
@@ -78,6 +82,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .field.wide select, .field.wide input { width: 100%; }
 .field input[type="range"] { width: 100%; padding: 0; border: 0; background: transparent; accent-color: var(--accent); }
 .field input[type="checkbox"] { width: auto; accent-color: var(--accent); justify-self: end; }
+.field input:disabled, .field select:disabled { opacity: 0.45; cursor: not-allowed; }
+.field label code { font-family: var(--font-mono); font-size: 11.5px; }
 .hint { font-size: 12px; color: var(--muted); line-height: 1.4; }
 .hint.good { color: var(--good-text); } .hint.bad { color: var(--crit-text); }
 .inline { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
@@ -102,7 +108,12 @@ button.primary { border: 1px solid var(--accent); background: var(--accent); col
 .verdict.warn { border-left-color: var(--warn); } .verdict.bad { border-left-color: var(--crit); }
 .verdict strong { font-family: var(--font-display); font-weight: 600; font-size: 20px; line-height: 1.2; }
 .verdict p { color: var(--ink-2); max-width: 70ch; }
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.view > .results { container-type: inline-size; }
+/* KPI strips: one row when every tile gets 170px, else one column; the six-tile strip steps 2, 3, 6 per row so no row is left half empty */
+.kpis { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+@container (min-width: 342px) { .kpis.six { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (min-width: 513px) { .kpis:not(.six) { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } .kpis.six { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container (min-width: 1026px) { .kpis.six { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
 .kpi { background: var(--surface); padding: 12px 14px 14px; min-width: 0; }
 .kpi .l { font-size: 12px; color: var(--muted); letter-spacing: 0.02em; }
 .kpi .v { font-family: var(--font-display); font-weight: 600; font-size: 30px; line-height: 1.1; margin-top: 4px; overflow-wrap: anywhere; }
@@ -110,7 +121,8 @@ button.primary { border: 1px solid var(--accent); background: var(--accent); col
 .kpi .s { font-size: 12px; color: var(--ink-2); margin-top: 5px; }
 .kpi.good .v::after, .kpi.bad .v::after { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 8px; vertical-align: middle; }
 .kpi.good .v::after { background: var(--good); } .kpi.bad .v::after { background: var(--crit); }
-.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+/* side by side only when each panel fits the layouts table (586px) without scrolling */
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 600px), 1fr)); gap: 18px; }
 .panel { background: var(--surface); border: 1px solid var(--line); padding: 14px 18px 16px; min-width: 0; }
 .panel h3 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
 .panel h4 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
@@ -122,16 +134,23 @@ button.primary { border: 1px solid var(--accent); background: var(--accent); col
 .key i, .legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; flex: none; }
 .key i { height: 10px; width: 10px; border-radius: 2px; }
 .key .t { color: var(--ink-2); flex: 1; } .key b { font-family: var(--font-mono); font-weight: 600; font-size: 12px; }
-.tw { overflow-x: auto; }
+.tw { overflow-x: auto; container-type: inline-size; }
 .tw.tall { max-height: 70vh; overflow: auto; }
 table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
-table.data th { text-align: left; font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); padding: 6px 8px; white-space: nowrap; }
+table.data th { text-align: left; font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); padding: 6px 8px; vertical-align: bottom; }
 table.data td { padding: 7px 8px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
-table.data td.n, table.data th.n { text-align: right; font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.data td.n, table.data th.n { text-align: right; font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+table.data td.n, .nowrap { white-space: nowrap; }
 table.data td.t { font-family: var(--font-body); }
 table.data tr.base td { background: var(--surface-2); }
+table.data tr.with-note td { border-bottom: 0; padding-bottom: 2px; }
+table.data tr.note-row td { padding-top: 0; font-size: 12px; color: var(--muted); }
+/* in a table wider than its scroll box the note stays in view and wraps at the visible width */
+table.data tr.note-row .note { position: sticky; left: 8px; max-width: calc(100cqw - 16px); }
+table.data tr.group th { padding-top: 16px; font-family: var(--font-body); font-weight: 400; font-size: 12.5px; letter-spacing: 0; text-transform: none; color: var(--muted); }
+table.data tr.group th b { font-size: 14px; color: var(--ink); }
+table.data.matrix th, table.data.matrix td { padding-left: 5px; padding-right: 5px; }
 table.data tr.muted td { color: var(--muted); }
-table.data .note { font-size: 12px; color: var(--muted); font-weight: 400; max-width: 34ch; }
 table.data small.up { color: var(--good-text); font-family: var(--font-mono); font-size: 11px; }
 table.data small.down { color: var(--crit-text); font-family: var(--font-mono); font-size: 11px; }
 .chip { display: inline-block; font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
@@ -145,9 +164,9 @@ table.data small.down { color: var(--crit-text); font-family: var(--font-mono); 
 .chart-title { font-size: 13px; color: var(--ink-2); }
 .chart-box { position: relative; }
 svg.chart { width: 100%; height: auto; display: block; }
-svg.chart text { font-family: var(--font-mono); font-size: 11px; fill: var(--chart-muted); }
-svg.chart text.axis-title { font-family: var(--font-body); font-size: 11.5px; fill: var(--ink-2); }
-svg.chart text.ref { font-family: var(--font-body); font-size: 11px; fill: var(--ink-2); }
+svg.chart text { font-family: var(--font-mono); font-size: 12px; fill: var(--chart-muted); }
+svg.chart text.axis-title { font-family: var(--font-body); font-size: 12.5px; fill: var(--ink-2); }
+svg.chart text.ref { font-family: var(--font-body); font-size: 12px; fill: var(--ink-2); paint-order: stroke; stroke: var(--chart-surface); stroke-width: 4px; stroke-linejoin: round; }
 .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); }
 .legend li { display: flex; align-items: center; gap: 8px; }
 .legend i.dot { width: 10px; height: 10px; border-radius: 50%; }
@@ -205,13 +224,16 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
     <h1>AI Fit</h1>
     <span class="sub">How many users, how much context, how much hardware for an LLM you host yourself</span>
   </div>
+  <div class="nav-row">
   <nav class="tabs" role="tablist" aria-label="Views">
-    <button class="tab" role="tab" data-mode="forward" aria-selected="true" type="button">Plan from hardware</button>
-    <button class="tab" role="tab" data-mode="reverse" aria-selected="false" type="button">Plan from workload</button>
-    <button class="tab" role="tab" data-mode="compat" aria-selected="false" type="button">Compatibility</button>
-    <button class="tab" role="tab" data-mode="catalog" aria-selected="false" type="button">Catalog</button>
-    <button class="tab" role="tab" data-mode="method" aria-selected="false" type="button">Method</button>
+    <button class="tab" role="tab" id="tab-forward" aria-controls="viewForward" data-mode="forward" aria-selected="true" tabindex="0" type="button">Plan from hardware</button>
+    <button class="tab" role="tab" id="tab-reverse" aria-controls="viewReverse" data-mode="reverse" aria-selected="false" tabindex="-1" type="button">Plan from workload</button>
+    <button class="tab" role="tab" id="tab-compat" aria-controls="viewCompat" data-mode="compat" aria-selected="false" tabindex="-1" type="button">Compatibility</button>
+    <button class="tab" role="tab" id="tab-catalog" aria-controls="viewCatalog" data-mode="catalog" aria-selected="false" tabindex="-1" type="button">Catalog</button>
+    <button class="tab" role="tab" id="tab-method" aria-controls="viewMethod" data-mode="method" aria-selected="false" tabindex="-1" type="button">Method</button>
   </nav>
+  <a class="arcade-link" id="arcadeLink" href="arcade/index.html" title="Show this setup on the arcade stage for talks">Arcade</a>
+  </div>
 </header>
 
 <main class="plan" id="plan">
@@ -239,12 +261,13 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
       <legend>Model</legend>
       <div class="field wide"><label for="model"><span class="term" data-term="model" tabindex="0">Model</span></label><select id="model"></select></div>
       <p class="hint" id="modelHint"></p>
-      <div class="field"><label for="engine"><span class="term" data-term="engine" tabindex="0">Serving engine</span></label><select id="engine"></select></div>
+      <div class="field wide"><label for="engine"><span class="term" data-term="engine" tabindex="0">Serving engine</span></label><select id="engine"></select></div>
       <p class="hint" id="engineHint"></p>
-      <div class="field"><label for="wPrec"><span class="term" data-term="w-prec" tabindex="0">Weight precision</span></label><select id="wPrec"></select></div>
+      <div class="field" id="slotsField" hidden><label for="slots"><span class="term" data-term="slots" tabindex="0">Parallel slots</span> (<code>OLLAMA_NUM_PARALLEL</code>, 0 = default)</label><input id="slots" type="number" min="0" step="1"></div>
+      <div class="field wide"><label for="wPrec"><span class="term" data-term="w-prec" tabindex="0">Weight precision</span></label><select id="wPrec"></select></div>
       <p class="hint" id="precHint"></p>
-      <div class="field"><label for="kvPrec"><span class="term" data-term="kv-prec" tabindex="0">KV cache precision</span></label><select id="kvPrec"></select></div>
-      <div class="field"><label for="par"><span class="term" data-term="layout" tabindex="0">Parallel layout</span></label><select id="par"><option value="auto">Best for this workload</option><option value="manual">Set by hand</option></select></div>
+      <div class="field wide"><label for="kvPrec"><span class="term" data-term="kv-prec" tabindex="0">KV cache precision</span></label><select id="kvPrec"></select></div>
+      <div class="field wide"><label for="par"><span class="term" data-term="layout" tabindex="0">Parallel layout</span></label><select id="par"><option value="auto">Best for this workload</option><option value="manual">Set by hand</option></select></div>
       <div class="inline" id="manualPar" hidden>
         <label><span class="term" data-term="tp" tabindex="0">Tensor (TP)</span><input id="tp" type="number" min="1" step="1"></label>
         <label><span class="term" data-term="pp" tabindex="0">Pipeline (PP)</span><input id="pp" type="number" min="1" step="1"></label>
@@ -255,14 +278,14 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
     <fieldset class="group" id="railWorkload">
       <legend>Workload</legend>
       <div class="field"><label for="users"><span class="term" data-term="users" tabindex="0">Users</span></label><input id="users" type="number" min="1" step="1"></div>
-      <div class="field"><label for="activityPreset">Usage pattern</label><select id="activityPreset"><option value="chat">Chat: 10% of time active</option><option value="assist">Assistant: 25%</option><option value="agents">Coding agents: 60%</option><option value="batch">Batch / API: 100%</option><option value="custom">Custom</option></select></div>
+      <div class="field wide"><label for="activityPreset">Usage pattern</label><select id="activityPreset"><option value="chat">Chat: 10% of time active</option><option value="assist">Assistant: 25%</option><option value="agents">Coding agents: 60%</option><option value="batch">Batch / API: 100%</option><option value="custom">Custom</option></select></div>
       <div class="field"><label for="activity"><span class="term" data-term="activity" tabindex="0">Share of time a user has a request in flight (%)</span></label><input id="activity" type="number" min="1" max="100" step="1"></div>
       <div class="field"><label for="ctx"><span class="term" data-term="ctx" tabindex="0">Context per session (tokens)</span></label><input id="ctx" type="number" min="1024" step="1024"></div>
       <div class="field wide"><input id="ctxRange" type="range" min="0" max="1200" step="1" aria-label="Context per session, logarithmic"></div>
       <div class="field"><label for="prefix"><span class="term" data-term="prefix" tabindex="0">Shared prefix (system prompt, shared docs)</span></label><input id="prefix" type="number" min="0" step="256"></div>
       <div class="field"><label for="newPrompt"><span class="term" data-term="new-prompt" tabindex="0">New prompt tokens per turn</span></label><input id="newPrompt" type="number" min="1" step="100"></div>
       <div class="field"><label for="output"><span class="term" data-term="output" tabindex="0">Output tokens per turn</span></label><input id="output" type="number" min="1" step="100"></div>
-      <div class="field wide"><label for="retention"><span class="term" data-term="retention" tabindex="0">Idle sessions' KV cache</span></label><select id="retention"><option value="host">Parked in host RAM, restored on the next turn</option><option value="gpu">Kept in GPU memory</option><option value="none">Evicted, whole conversation re-prefilled</option></select></div>
+      <div class="field wide"><label for="retention"><span class="term" data-term="retention" tabindex="0">Idle sessions' KV cache</span></label><select id="retention"><option value="host">Parked in host RAM between turns</option><option value="gpu">Kept in GPU memory</option><option value="none">Evicted, full re-prefill next turn</option></select></div>
       <div class="field"><label for="target"><span class="term" data-term="target" tabindex="0">Minimum tok/s per user</span></label><input id="target" type="number" min="0.1" step="1"></div>
       <div class="field"><label for="ttftMax"><span class="term" data-term="ttft-max" tabindex="0">Longest acceptable time to first token (s)</span></label><input id="ttftMax" type="number" min="0.1" step="1"></div>
     </fieldset>
@@ -275,9 +298,10 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
         <label><span class="term" data-term="spec-alpha" tabindex="0">Accepted %</span><input id="specAlpha" type="number" min="5" max="99" step="5"></label>
       </div>
       <div class="field"><label for="pd"><span class="term" data-term="pd" tabindex="0">Prefill / decode disaggregation</span></label><input id="pd" type="checkbox"></div>
+      <p class="hint" id="optHint" hidden></p>
     </fieldset>
     <details class="group" id="railAdv">
-      <summary><legend>Assumptions</legend></summary>
+      <summary>Assumptions</summary>
       <div class="field"><label for="advUtil"><span class="term" data-term="util" tabindex="0">Memory the engine may use (%)</span></label><input id="advUtil" type="number" min="50" max="100" step="1"></div>
       <div class="field"><label for="advOverheadGB"><span class="term" data-term="overhead-gb" tabindex="0">Runtime overhead per accelerator (GB)</span></label><input id="advOverheadGB" type="number" min="0" step="0.5"></div>
       <div class="field"><label for="advOverheadFrac"><span class="term" data-term="overhead-frac" tabindex="0">Activation overhead (% of weight shard)</span></label><input id="advOverheadFrac" type="number" min="0" step="1"></div>
@@ -292,10 +316,10 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
   </aside>
 
   <section class="results">
-    <div class="view" data-mode="forward" id="viewForward">
+    <div class="view" data-mode="forward" id="viewForward" role="tabpanel" aria-labelledby="tab-forward">
       <div class="results">
         <div id="verdict" class="verdict"></div>
-        <div id="kpis" class="kpis"></div>
+        <div id="kpis" class="kpis six"></div>
         <div class="two">
           <section class="panel"><h3>Layout and memory</h3><div id="configBody"></div></section>
           <section class="panel"><h3>Where the time goes</h3><div id="bottleneckBody"></div></section>
@@ -307,7 +331,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
       </div>
     </div>
 
-    <div class="view" data-mode="reverse" id="viewReverse" hidden>
+    <div class="view" data-mode="reverse" id="viewReverse" role="tabpanel" aria-labelledby="tab-reverse" hidden>
       <div class="results">
         <div class="verdict"><strong>What do I need for this workload?</strong><p id="revIntro"></p></div>
         <div id="revSummary" class="kpis"></div>
@@ -315,7 +339,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
       </div>
     </div>
 
-    <div class="view" data-mode="compat" id="viewCompat" hidden>
+    <div class="view" data-mode="compat" id="viewCompat" role="tabpanel" aria-labelledby="tab-compat" hidden>
       <div class="results">
         <div class="verdict"><strong>Which model runs on which hardware?</strong><p id="compatIntro"></p></div>
         <section class="panel">
@@ -327,10 +351,10 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
       </div>
     </div>
 
-    <div class="view" data-mode="catalog" id="viewCatalog" hidden>
+    <div class="view" data-mode="catalog" id="viewCatalog" role="tabpanel" aria-labelledby="tab-catalog" hidden>
       <div class="results">
         <section class="panel"><h3>Accelerators</h3><div id="catHardware"></div><p class="hint" style="margin-top:8px">~ marks entries with announced, derived or otherwise unconfirmed figures. Memory in decimal GB, bandwidth in GB/s, compute as dense TFLOPS (no sparsity). Native and weight-only formats come from the chip generation (one table per generation in catalog.js), not from the per-device row.</p><p class="hint" id="catLint" style="margin-top:6px"></p></section>
-        <section class="panel"><h3>Engine support</h3><div id="catEngines"></div><p class="hint" style="margin-top:8px">Which weight formats and KV-cache dtypes each serving engine runs per hardware family, transcribed from the engines' docs on the date shown. "native" computes in that format, "weight-only" keeps the weights small but computes in BF16. Sources are linked below the table.</p></section>
+        <section class="panel"><h3>Engine support</h3><div id="catEngines"></div><p class="hint" style="margin-top:8px">Where each serving engine runs, and which weight formats and KV-cache dtypes it runs per hardware family, transcribed from the engines' docs and source code on the date shown. "native" computes in that format, "weight-only" keeps the weights small but computes in BF16. The second table shows how each engine serves requests. Sources are linked in the tables and below them.</p></section>
         <section class="panel"><h3>Models</h3><div id="catModels"></div><p class="hint" style="margin-top:8px">KV per token counts every layer's K and V (or the MLA latent) in BF16; sliding-window layers still count in full here but are capped at their window when a session is sized. "Verified against" names the Hugging Face repo whose config.json the shape was checked against with <code>node tools/import-model.js --check</code>; "ships in" is the checkpoint's own precision.</p></section>
         <section class="panel"><h3>Add your own</h3>
           <p class="hint">Paste one JSON object or an array. Hardware needs <code>id, name, mem, bw</code> and ideally <code>tflops: {fp16, fp8, fp4}, link, linkBw, nodeGpus, tdp, price</code>. Models need <code>id, name, params, layers, dModel, nHeads, nKv, dHead, maxCtx</code> and optionally <code>active, moe, attn, sparse, statePerSeqMB, nativeCtx</code>. Same ids replace the built-in entry. Entries are kept in this browser only.</p>
@@ -341,7 +365,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
       </div>
     </div>
 
-    <div class="view" data-mode="method" id="viewMethod" hidden>
+    <div class="view" data-mode="method" id="viewMethod" role="tabpanel" aria-labelledby="tab-method" hidden>
       <section class="panel prose">
         <h2>How the numbers are made</h2>
         <p>Everything here is a roofline estimate. It is meant to get the order of magnitude and the trade-offs right (memory versus bandwidth versus compute versus network) before you rent or buy anything. Measure on the real stack before you commit; the assumptions panel lets you dial the model to what you measure.</p>
@@ -366,12 +390,20 @@ step   = (max(t_bw, t_comp) + t_comm) · (1 + bubble · (PP − 1) / PP)</pre>
         <h3>Capacity and the reverse search</h3>
         <p>For a layout, the memory limit is the number of sessions that fit the pool; the speed limit is the largest batch per replica whose per-user tokens/s still clear the target without prefill saturation, provided the time to first token is within its limit (a binary search over the load model). Concurrency is the lower of the two times the replica count; users are concurrency divided by activity. The context-at-load figure inverts the memory equation for the sessions you asked to keep resident.</p>
         <p>"Best for this workload" tries every TP in {1…64} that divides the head count (across nodes only if you allow it) and every PP in {1…16}, filling the accelerator count with replicas, and keeps the layout with the most users, then the fewest idle accelerators, then the highest per-user speed. The workload planner does the same per candidate accelerator with an open count: it sizes one replica, multiplies until the users fit, and keeps the smallest count, then the lowest hourly price. Cost per million output tokens is hourly price over aggregate decode throughput.</p>
+        <h3>Serving engines</h3>
+        <p>The engine decides three things: whether it runs on the hardware at all (TensorRT-LLM only on NVIDIA; Ollama not on TPUs, Gaudi or Trainium), which weight and KV formats have kernels there (the support matrix in the catalog), and how requests share the accelerators.</p>
+        <ul>
+          <li><strong>Continuous batching</strong> (vLLM, SGLang, TensorRT-LLM): requests share a paged KV cache and join the batch at every step, up to the engine's default cap per replica (<code>max_num_seqs</code> 1024, or 256 below 70 GiB and on A100; <code>max_running_requests</code> 2048 to 4096; <code>max_batch_size</code> 2048).</li>
+          <li><strong>Parallel slots</strong> (Ollama): <code>OLLAMA_NUM_PARALLEL</code> slots, 1 by default, each reserving its full context when the model loads, so a server runs <code>min(slots, pool ÷ session)</code> requests and queues the rest (512, then rejects). A model larger than one GPU is split by layers within one node; a token passes the GPUs one after another, so <code>t_bw = (weights + b · kv) / bandwidth</code> and compute uses one GPU at a time: more GPUs add memory, not speed. Prefixes are reused within a slot but stored per session, and idle slots park in llama-server's 8 GiB host prompt cache. More servers behind a load balancer add slots.</li>
+        </ul>
+        <p>The speed of one request follows the same roofline on every engine: the planner applies no per-engine efficiency factors. Optimizations an engine lacks count as off, and an idle-session mode it lacks falls back to eviction.</p>
         <h3>What is not modeled</h3>
         <ul>
           <li>Scheduling detail: queueing, batching windows, chunk sizes, CUDA graph capture limits, CPU overhead of the serving process.</li>
           <li>Expert-parallel all-to-all traffic (treated like the tensor-parallel all-reduce), load imbalance across experts, and MoE kernels that run below the BF16 roofline.</li>
           <li>Quality effects of quantization or RoPE scaling; the tool only flags contexts beyond the native window.</li>
           <li>Vision encoders, tool-call overheads, and multi-LoRA serving.</li>
+          <li>Differences in kernel efficiency between engines, and Ollama spilling layers to the CPU when a model does not fit the GPUs.</li>
         </ul>
         <p class="hint">Catalog figures come from vendor data sheets and model cards as of mid-2026; entries marked ~ are announced or derived. Correct them in the catalog view if you have better numbers.</p>
       </section>
@@ -387,6 +419,7 @@ step   = (max(t_bw, t_comp) + t_comm) · (1 + bubble · (PP − 1) / PP)</pre>
 <script src="catalog.js"></script>
 <script src="glossary.js"></script>
 <script src="engine.js"></script>
+<script src="common.js"></script>
 <script src="app.js"></script>
 
 </body>

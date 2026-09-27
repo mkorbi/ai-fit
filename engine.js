@@ -1,4 +1,4 @@
-/* engine.js — capacity model for AI Fit.
+/* engine.js - capacity model for AI Fit.
  * Pure functions, no DOM. Works in the browser (globals) and in node (module.exports).
  *
  * The model is a roofline estimate, not a simulator:
@@ -12,10 +12,11 @@ const Engine = (() => {
   const ARCHS_ = typeof ARCHS !== 'undefined' ? ARCHS : require('./catalog.js').ARCHS;
   const ENGINES_ = typeof ENGINES !== 'undefined' ? ENGINES : require('./catalog.js').ENGINES;
   const FAMILY_ = typeof ENGINE_FAMILY !== 'undefined' ? ENGINE_FAMILY : require('./catalog.js').ENGINE_FAMILY;
+  const FAMILIES_ = typeof ENGINE_FAMILIES !== 'undefined' ? ENGINE_FAMILIES : require('./catalog.js').ENGINE_FAMILIES;
   const BYTES_W  = { bf16: 2, fp8: 1, int8: 1, int4: 0.52, fp4: 0.53 };   // bytes per parameter incl. group scales
   const BYTES_KV = { bf16: 2, fp8: 1, int8: 1, int4: 0.56 };              // bytes per KV element
   const W_PRECS  = ['bf16', 'fp8', 'int8', 'int4', 'fp4'];
-  const KV_PRECS = ['bf16', 'fp8', 'int4'];
+  const KV_PRECS = ['bf16', 'fp8', 'int8', 'int4'];
   const PREC_LABEL = { bf16: 'BF16', fp8: 'FP8', int8: 'INT8', int4: 'INT4 (AWQ/GPTQ)', fp4: 'FP4 (NVFP4/MXFP4)' };
   const KV_LABEL = { bf16: 'BF16', fp8: 'FP8', int8: 'INT8', int4: 'INT4' };
   const TP_CANDIDATES = [1, 2, 4, 8, 16, 32, 64];
@@ -38,7 +39,9 @@ const Engine = (() => {
   const norm = (m) => Object.assign({ active: m.params, attn: [{ n: m.layers, type: 'full' }] }, m);
   const isMla = (m) => m.attn.some((l) => l.type === 'mla');
 
-  function weightBytes(model, prec) {
+  function weightBytes(model, prec, engine) {
+    const b = bytesW(prec, engine);
+    if (b != null) return model.params * 1e9 * b;                     // whole-file bits per weight (GGUF): embeddings and head included
     return model.params * 1e9 * (0.98 * BYTES_W[prec] + 0.02 * 2);   // ~2% (embeddings, norms, head) stay 16-bit
   }
   function expertSplit(model) {
@@ -59,8 +62,8 @@ const Engine = (() => {
     return 2 * (l.nKv ?? model.nKv) * (l.dHead ?? model.dHead) * bytes;
   }
   /* KV bytes for one session of C tokens, of which the first S tokens are a prefix shared by every session. */
-  function kvSplit(model, kvPrec, C, S) {
-    const bytes = BYTES_KV[kvPrec];
+  function kvSplit(model, kvPrec, C, S, engine) {
+    const bytes = bytesKv(kvPrec, engine);
     let shared = 0, per = 0, full = 0;
     for (const l of model.attn) {
       const pt = layerPerTok(l, model, bytes);
@@ -71,8 +74,8 @@ const Engine = (() => {
     const st = (model.statePerSeqMB || 0) * 1e6;
     return { shared, perSession: per + st, full: full + st };
   }
-  const kvAtCtx = (model, kvPrec, C) => kvSplit(model, kvPrec, C, 0).perSession;
-  const kvPerTokenFull = (model, kvPrec) => model.attn.reduce((a, l) => a + l.n * layerPerTok(l, model, BYTES_KV[kvPrec]), 0);
+  const kvAtCtx = (model, kvPrec, C, engine) => kvSplit(model, kvPrec, C, 0, engine).perSession;
+  const kvPerTokenFull = (model, kvPrec, engine) => model.attn.reduce((a, l) => a + l.n * layerPerTok(l, model, bytesKv(kvPrec, engine)), 0);
 
   /* Attention FLOPs for one decoded token attending over ctx tokens. */
   function attnFlopsPerTok(model, ctx) {
@@ -122,20 +125,91 @@ const Engine = (() => {
     return 'unsupported';
   }
   const familyOf = (hw) => FAMILY_[hw.arch] || 'other';
+  const engineOf = (id) => (id && id !== 'none' && ENGINES_[id]) || null;
+  /* Does the engine run on this hardware at all? Engines list the families they support (catalog.js ENGINES[].families);
+   * engine 'none' covers everything, and custom hardware without a known generation is 'unknown' (treated as covered). */
+  function engineCovers(hw, id) {
+    const e = engineOf(id);
+    if (!e || !e.families) return 'yes';
+    const f = FAMILY_[hw.arch];
+    return !f ? 'unknown' : e.families.includes(f) ? 'yes' : 'no';
+  }
+  /* "NVIDIA Ampere, Ada Lovelace, Hopper; AMD CDNA 3" for a list of family ids. */
+  function familyNames(ids) {
+    const groups = [];
+    for (const f of FAMILIES_) {
+      if (!ids.includes(f.id)) continue;
+      const g = groups.find((x) => x.vendor === f.vendor);
+      if (g) g.names.push(f.name); else groups.push({ vendor: f.vendor, names: [f.name] });
+    }
+    return groups.map((g) => (g.names.length === 1 && g.names[0].startsWith(g.vendor) ? g.names[0] : `${g.vendor} ${g.names.join(', ')}`)).join('; ');
+  }
+  /* How an engine serves requests (catalog.js ENGINES[].serving). The defaults describe a fully capable engine: continuous
+   * batching over a paged KV cache, tensor and pipeline parallelism across nodes, every optimization available and no cap
+   * on concurrent requests. Engine 'none' and entries without `serving` use them unchanged. */
+  const SERVING_FULL = {
+    batching: 'continuous',   // 'continuous' (requests join and leave the batch every step) or 'slots' (a fixed number of parallel slots)
+    slots: null,              // slots: { default, env } for slot engines: every slot reserves a full context at load time
+    maxBatch: null,           // default cap on concurrent requests per replica: { value } | { tiers, default } | { perTokens, min, max }
+    paged: true,              // KV cache in pages (fragmentation share applies) rather than one contiguous reservation per slot
+    pp: 'pipelined',          // 'pipelined' (micro-batches keep every stage busy) or 'sequential' (layer split: stages take turns)
+    maxTp: Infinity, multiNode: true,
+    prefixCache: true,        // true = shared prefix stored once per replica; 'per-slot' = reused per slot, stored per session; false
+    spec: true, pd: true, dpAttention: true,
+    retention: ['host', 'gpu', 'none'],
+    hostCacheGB: null,        // host memory the engine may use to park idle sessions, per replica (null = the nodes' RAM)
+    queueMax: null,           // requests an engine queues before rejecting (null = unbounded)
+  };
+  const servingOf = (id) => Object.assign({}, SERVING_FULL, (engineOf(id) || {}).serving);
+  const formatOf = (id, kind, prec) => ((((engineOf(id) || {}).formats || {})[kind] || {})[prec]) || {};
+  const bytesW = (prec, id) => formatOf(id, 'w', prec).bytes;                           // per-engine override or undefined
+  const bytesKv = (prec, id) => formatOf(id, 'kv', prec).bytes ?? BYTES_KV[prec];
+  const precLabel = (prec, id) => formatOf(id, 'w', prec).label || PREC_LABEL[prec];
+  const kvLabel = (prec, id) => formatOf(id, 'kv', prec).label || KV_LABEL[prec];
+  /* Default cap on concurrent requests per replica for a continuous-batching engine. */
+  function maxBatchOf(sv, hw, poolTokens, model) {
+    const m = sv.maxBatch;
+    if (!m) return Infinity;
+    if (m.value) return m.value;
+    if (m.tiers) {
+      const gib = hw.mem * 1e9 / 2 ** 30;
+      const t = m.tiers.find((x) => gib >= x.minGiB && !(x.notArch || []).includes(hw.arch));
+      return t ? t.value : m.default;
+    }
+    if (m.perTokens) {
+      const est = Math.min(m.max, Math.max(m.min, Math.floor(poolTokens / model.maxCtx * m.perTokens)));
+      return Math.max(1, Math.min(est, Math.floor(poolTokens / 2)));
+    }
+    return Infinity;
+  }
+  const OPT_NAMES = { prefixCache: 'prefix caching', spec: 'speculative decoding', pd: 'prefill/decode disaggregation', dpAttention: 'data-parallel attention', retention: 'the chosen idle-session mode' };
+  /* What the engine actually runs: optimizations it lacks count as off, an idle-session mode it lacks falls back to eviction.
+   * `gated` lists what was asked for but is not available. */
+  function effective(p) {
+    const sv = servingOf(p.engine), o = p.opt || {}, gated = [];
+    const opt = { prefixCache: !!o.prefixCache && sv.prefixCache === true, spec: !!o.spec && !!sv.spec, pd: !!o.pd && !!sv.pd };
+    for (const k of ['prefixCache', 'spec', 'pd']) if (o[k] && !opt[k]) gated.push(k);
+    const dpAttention = !!p.dpAttention && !!sv.dpAttention;
+    if (p.dpAttention && !dpAttention) gated.push('dpAttention');
+    let retention = p.wl.retention;
+    if (!sv.retention.includes(retention)) { gated.push('retention'); retention = sv.retention.includes('none') ? 'none' : sv.retention[0]; }
+    return { sv, opt, dpAttention, retention, gated };
+  }
   /* Weight-format support as the weaker of silicon capability and the chosen engine's documented kernels. */
   function formatSupport(hw, wPrec, engine) {
+    const eng = engineOf(engine);
+    if (eng && engineCovers(hw, engine) === 'no') return 'unsupported';
     const cap = hwSupport(hw, wPrec);
-    const eng = engine && engine !== 'none' ? ENGINES_[engine] : null;
     if (!eng || wPrec === 'bf16' || cap === 'unsupported') return cap;
     const e = (eng.weights[wPrec] || {})[familyOf(hw)];
     if (!e) return 'unsupported';
     return e === 'weight-only' || cap === 'weight-only' ? 'weight-only' : 'native';
   }
-  /* KV-cache dtype support: the silicon always can (it is just storage); the engine must have kernels for it. */
+  /* KV-cache dtype support: the silicon always can (it is just storage); the engine must run there and have kernels for it. */
   function kvSupport(hw, kvPrec, engine) {
-    if (kvPrec === 'bf16') return 'supported';
-    const eng = engine && engine !== 'none' ? ENGINES_[engine] : null;
-    if (!eng) return 'supported';
+    const eng = engineOf(engine);
+    if (eng && engineCovers(hw, engine) === 'no') return 'unsupported';
+    if (kvPrec === 'bf16' || !eng) return 'supported';
     const fams = (eng.kvCache || {})[kvPrec];
     return fams && fams.includes(familyOf(hw)) ? 'supported' : 'unsupported';
   }
@@ -155,29 +229,46 @@ const Engine = (() => {
   /* ---------- the core evaluation of one layout ---------- */
   function evaluate(p) {
     const hw = p.hw, model = norm(p.model), adv = Object.assign({}, DEFAULT_ADV, p.adv || {});
-    const wl = p.wl, opt = p.opt;
+    const eff = effective(p), sv = eff.sv, opt = eff.opt;
+    const wl = eff.retention === p.wl.retention ? p.wl : Object.assign({}, p.wl, { retention: eff.retention });
     const tp = p.tp, pp = p.pp, R = p.replicas, G = tp * pp, total = G * R;
+    const seqPP = sv.pp === 'sequential', computeGpus = seqPP ? tp : G;   // layer split: the stages take turns
     const warnings = [];
     const push = (level, text) => warnings.push({ level, text });
 
     // memory
-    const W = weightBytes(model, p.wPrec);
+    const W = weightBytes(model, p.wPrec, p.engine);
     const split = expertSplit(model);
     const denseBytes = W * split.dense / (model.params * 1e9), expertBytes = W * split.expert / (model.params * 1e9);
     const overhead = adv.overheadGB * 1e9 + adv.overheadFrac * (W / G);
     const capPerGpu = hw.mem * 1e9 * adv.util - overhead;
     const kvAvailRaw = G * capPerGpu - W;
     const mla = isMla(model);
-    const kvRepl = p.dpAttention ? 1 : (mla ? tp : Math.max(1, tp / model.nKv));
-    const kvAvail = kvAvailRaw > 0 ? kvAvailRaw * (1 - adv.frag) / kvRepl : 0;
+    const kvRepl = eff.dpAttention ? 1 : (mla ? tp : Math.max(1, tp / model.nKv));
+    const frag = sv.paged ? adv.frag : 0;
+    const kvAvail = kvAvailRaw > 0 ? kvAvailRaw * (1 - frag) / kvRepl : 0;
     const C = Math.max(64, wl.ctx);
-    const S = opt.prefixCache && wl.prefix > 0 ? Math.min(wl.prefix, C - 1) : 0;
-    const kv = kvSplit(model, p.kvPrec, C, S);
-    const maxSessions = kvAvail > kv.shared ? Math.floor((kvAvail - kv.shared) / kv.perSession) : 0;
+    const prefix = wl.prefix > 0 ? Math.min(wl.prefix, C - 1) : 0;
+    const S = opt.prefixCache ? prefix : 0;                                     // stored once per replica
+    const Scomp = opt.prefixCache || sv.prefixCache === 'per-slot' ? prefix : 0;  // not prefilled again
+    const kv = kvSplit(model, p.kvPrec, C, S, p.engine);
+    const memSessions = kvAvail > kv.shared ? Math.floor((kvAvail - kv.shared) / kv.perSession) : 0;
     const pk = peakFlops(hw, p.wPrec, p.engine);
+    const covers = engineCovers(hw, p.engine);
     const kvOK = kvSupport(hw, p.kvPrec, p.engine) === 'supported';
-    const loadable = pk.support !== 'unsupported' && kvOK;
+    const tpOK = tp <= sv.maxTp, nodeOK = sv.multiNode || G <= p.nodeGpus;
+    const loadable = covers !== 'no' && pk.support !== 'unsupported' && kvOK && tpOK && nodeOK;
+    // slot engines reserve every slot's full context when the model loads: extra memory beyond that buys nothing
+    let maxSessions = memSessions, slots = null;
+    if (sv.batching === 'slots') {
+      const n = p.slots > 0 ? p.slots | 0 : sv.slots.default;
+      slots = { n, auto: !(p.slots > 0), env: sv.slots.env, fit: memSessions >= n, reserved: kv.shared + n * kv.perSession };
+      slots.unused = slots.fit ? Math.max(0, kvAvail - slots.reserved) : 0;
+      maxSessions = slots.fit ? n : 0;
+    }
     const fits = loadable && kvAvailRaw > 0 && maxSessions >= 1;
+    const poolTokens = kvAvail / Math.max(1, kvPerTokenFull(model, p.kvPrec, p.engine));
+    const maxBatch = slots ? slots.n : maxBatchOf(sv, hw, poolTokens, model);   // concurrent requests one replica takes
 
     // workload shape
     const B = Math.max(1, Math.round(wl.users * wl.activity));
@@ -185,9 +276,10 @@ const Engine = (() => {
     const sessionsPerRep = Math.ceil(residentUsers / R);
     const bPerRep = Math.ceil(B / R);
     const memOK = fits && sessionsPerRep <= maxSessions;
+    const slotLimited = !!slots && fits && !memOK;
     const nodes = Math.ceil(total / p.nodeGpus);
     const idleUsers = Math.max(0, wl.users - B);
-    const hostBytes = wl.retention === 'host' ? nodes * p.hostRamGB * 1e9 * 0.8 : 0;
+    const hostBytes = wl.retention === 'host' ? Math.min(nodes * p.hostRamGB * 1e9 * 0.8, sv.hostCacheGB != null ? R * sv.hostCacheGB * 1e9 : Infinity) : 0;
     const hostSessions = wl.retention === 'host' ? Math.floor(hostBytes / kv.perSession) : 0;
     const hostCoverage = wl.retention === 'host' ? (idleUsers > 0 ? Math.min(1, hostSessions / idleUsers) : 1) : 0;
 
@@ -206,14 +298,15 @@ const Engine = (() => {
       const Cavg = Math.max(1, C - wl.output / 2);
       const kmul = spec ? adv.specK + 1 : 1;
       const wRead = denseBytes + expertBytes * touched(model, b * kmul);
-      const kvRead = b * kvAtCtx(model, p.kvPrec, Cavg);
-      const tBw = (wRead + kvRead / pp) / (tp * hw.bw * 1e9 * adv.bwEff);
+      const kvRead = b * kvAtCtx(model, p.kvPrec, Cavg, p.engine);
+      // pipelined stages overlap micro-batches; a sequential layer split reads every stage's weights and KV one after another
+      const tBw = (wRead + (seqPP ? kvRead : kvRead / pp)) / (tp * hw.bw * 1e9 * adv.bwEff);
       const flopsTok = 2 * model.active * 1e9 + attnFlopsPerTok(model, Cavg);
-      const tComp = b * kmul * flopsTok / (G * pk.peak * adv.mfu);
+      const tComp = b * kmul * flopsTok / (computeGpus * pk.peak * adv.mfu);
       let tComm = 0;
       if (tp > 1) tComm += collective(tpCross, 2 * (tp - 1) / tp * b * kmul * model.dModel * 2, 2 * model.layers);
       if (pp > 1) tComm += collective(ppCross, b * kmul * model.dModel * 2, pp - 1);
-      const bubble = pp > 1 ? 1 + adv.ppBubble * (pp - 1) / pp : 1;
+      const bubble = pp > 1 && !seqPP ? 1 + adv.ppBubble * (pp - 1) / pp : 1;
       const step = (Math.max(tBw, tComp) + tComm) * bubble;
       const bound = tComm > Math.max(tBw, tComp) ? 'communication' : (tBw >= tComp ? 'memory bandwidth' : 'compute');
       return { tBw, tComp, tComm, step, bound, wRead, kvRead };
@@ -227,8 +320,8 @@ const Engine = (() => {
       return { t, flops };
     }
     const promptLen = Math.max(1, C - wl.output);
-    const coldNew = Math.max(1, promptLen - S);
-    const cold = prefill(coldNew, S);
+    const coldNew = Math.max(1, promptLen - Scomp);
+    const cold = prefill(coldNew, Scomp);
     let warm, restoreS = 0, warmNew = coldNew;
     if (wl.retention === 'none') warm = cold;
     else {
@@ -239,11 +332,12 @@ const Engine = (() => {
     const cov = wl.retention === 'host' ? hostCoverage : 1;
     const reqFlops = cov * warm.flops + (1 - cov) * cold.flops;
     const ttft = cov * (warm.t + restoreS) + (1 - cov) * cold.t;
-    const cap = G * pk.peak * adv.mfu;
+    const cap = computeGpus * pk.peak * adv.mfu;
     const ttftMax = wl.ttftMax > 0 ? wl.ttftMax : Infinity;
     const ttftOK = ttft <= ttftMax;
 
     function loadAt(b, spec) {
+      spec = spec && !!sv.spec;
       const d = decodeStep(b, spec);
       const acc = spec ? (1 - Math.pow(adv.specAlpha, adv.specK + 1)) / (1 - adv.specAlpha) : 1;
       const o = wl.output / acc;
@@ -264,7 +358,9 @@ const Engine = (() => {
       const pdGpus = opt.pd ? Math.ceil(lambda * reqFlops / (pk.peak * adv.mfu)) : 0;
       return Object.assign(d, { acc, itl, f, saturated, lambda, dur, prefillLoad, pdGpus, perUser: acc / itl, agg: b * acc / itl });
     }
-    const bCap = wl.retention === 'gpu' ? Math.max(0, Math.floor(maxSessions * wl.activity)) : maxSessions;
+    // with every session resident, the decode batch is the resident sessions' share in flight; one resident session still decodes
+    const bMem = wl.retention === 'gpu' ? (maxSessions >= 1 ? Math.max(1, Math.floor(maxSessions * wl.activity)) : 0) : maxSessions;
+    const bCap = Math.min(bMem, maxBatch);
     function bSpeedSearch() {
       if (bCap < 1) return 0;
       if (!ttftOK) return 0;
@@ -285,19 +381,26 @@ const Engine = (() => {
       maxConc = Math.min(maxSessions, bSpeed) * R;
       maxUsers = Math.floor(maxConc / wl.activity);
     }
-    const at = fits ? loadAt(Math.min(bPerRep, Math.max(1, maxSessions)), opt.spec) : null;
+    const bAt = Math.min(bPerRep, Math.max(1, maxSessions), maxBatch);        // requests one replica actually runs at this load
+    const at = fits ? loadAt(bAt, opt.spec) : null;
     const speedOK = !!at && memOK && ttftOK && at.perUser >= wl.target && !at.saturated;
+    // what bounds capacity: memory, the engine's slots or batch cap, or the speed and first-token targets
+    let capLimit = 'none';
+    if (!loadable) capLimit = 'unsupported';
+    else if (!fits) capLimit = slots && !slots.fit ? 'slots' : 'memory';
+    else if (bSpeed < bCap || bCap < 1) capLimit = !ttftOK ? 'ttft' : (loadAt(Math.min(bCap, bSpeed + 1), opt.spec).saturated ? 'prefill' : 'speed');
+    else capLimit = slots ? 'slots' : maxBatch < bMem ? 'max-batch' : 'memory';
 
     function solveMaxCtx(sessions) {
       if (!fits || sessions < 1) return 0;
-      const fitsAt = (c) => { const s = opt.prefixCache && wl.prefix > 0 ? Math.min(wl.prefix, c - 1) : 0; const k = kvSplit(model, p.kvPrec, c, s); return k.shared + sessions * k.perSession <= kvAvail; };
+      const fitsAt = (c) => { const s = opt.prefixCache && wl.prefix > 0 ? Math.min(wl.prefix, c - 1) : 0; const k = kvSplit(model, p.kvPrec, c, s, p.engine); return k.shared + sessions * k.perSession <= kvAvail; };
       if (!fitsAt(64)) return 0;
       let lo = 64, hi = 1 << 26;
       if (fitsAt(hi)) return hi;
       while (hi - lo > 64) { const mid = Math.floor((lo + hi) / 2); if (fitsAt(mid)) lo = mid; else hi = mid; }
       return lo;
     }
-    const maxCtxAtLoad = solveMaxCtx(sessionsPerRep);
+    const maxCtxAtLoad = solveMaxCtx(slots ? slots.n : sessionsPerRep);
 
     // cost and power
     const pdTotal = at ? at.pdGpus * R : 0;
@@ -310,10 +413,17 @@ const Engine = (() => {
     // warnings
     if (wl.ctx > model.maxCtx) push('crit', `Context of ${fmtTok(wl.ctx)} exceeds the model's maximum of ${fmtTok(model.maxCtx)} tokens.`);
     else if (model.nativeCtx && wl.ctx > model.nativeCtx) push('warn', `Beyond the native ${fmtTok(model.nativeCtx)} context; needs RoPE scaling (YaRN), quality may drop.`);
-    const engName = p.engine && p.engine !== 'none' && ENGINES_[p.engine] ? ENGINES_[p.engine].name : null;
-    if (pk.support === 'unsupported') push('crit', engName && hwSupport(hw, p.wPrec) !== 'unsupported' ? `${engName} has no kernel for ${PREC_LABEL[p.wPrec]} weights on ${(ARCHS_[hw.arch] || {}).name || 'this generation'} (per its docs, checked ${ENGINES_[p.engine].checked}).` : `${PREC_LABEL[p.wPrec]} weights cannot be loaded on ${hw.name} (${(ARCHS_[hw.arch] || {}).name || 'unknown generation'}): no kernel for that format.`);
-    if (!kvOK) push('crit', `${engName} does not support a ${KV_LABEL[p.kvPrec]} KV cache on ${(ARCHS_[hw.arch] || {}).name || 'this generation'}; use FP8 or BF16 KV cache.`);
-    else if (!fits) push('crit', kvAvailRaw <= 0 ? `Weights alone (${fmtGB(W)}) do not fit in ${G} × ${hw.mem} GB with headroom.` : `Only ${fmtGB(kvAvail)} left for KV cache; one session at ${fmtTok(C)} needs ${fmtGB(kv.perSession)}.`);
+    const eng = engineOf(p.engine), engName = eng ? eng.name : null;
+    const archName = (ARCHS_[hw.arch] || {}).name;
+    if (covers === 'no') push('crit', `${engName} does not run on ${archName || hw.name}; per its docs (checked ${(eng.familiesSource || eng).checked}) it runs on ${familyNames(eng.families)}.`);
+    else if (pk.support === 'unsupported') push('crit', engName && hwSupport(hw, p.wPrec) !== 'unsupported' ? `${engName} has no kernel for ${precLabel(p.wPrec, p.engine)} weights on ${archName || 'this generation'} (per its docs, checked ${eng.checked}).` : `${PREC_LABEL[p.wPrec]} weights cannot be loaded on ${hw.name} (${archName || 'unknown generation'}): no kernel for that format.`);
+    else if (!kvOK) push('crit', `${engName} does not support a ${kvLabel(p.kvPrec, p.engine)} KV cache on ${archName || 'this generation'}; use ${Object.keys(eng.kvCache || {}).filter((k) => kvSupport(hw, k, p.engine) === 'supported').concat('bf16').map((k) => kvLabel(k, p.engine)).join(' or ')} KV cache.`);
+    else if (!tpOK) push('crit', `${engName} splits layers across GPUs and has no tensor parallelism: use TP 1 and spread the model with PP instead.`);
+    else if (!nodeOK) push('crit', `${engName} serves a model within one node (${p.nodeGpus} accelerators); this layout needs ${G}.`);
+    else if (!fits) push('crit', kvAvailRaw <= 0 ? `Weights alone (${fmtGB(W)}) do not fit in ${G} × ${hw.mem} GB with headroom.`
+      : slots && !slots.fit && memSessions >= 1 ? `${slots.n} parallel slot${slots.n === 1 ? '' : 's'} × ${fmtTok(C)} tokens need ${fmtGB(slots.reserved)} of KV cache; ${fmtGB(kvAvail)} is free after the weights. ${engName} would move layers to the CPU (much slower, not modeled): lower ${slots.env} or the context.`
+      : `Only ${fmtGB(kvAvail)} left for KV cache; one session at ${fmtTok(C)} needs ${fmtGB(kv.perSession)}.`);
+    else if (slotLimited) push('crit', `${sessionsPerRep} ${wl.retention === 'gpu' ? 'resident sessions' : 'concurrent requests'} per server but ${slots.n} parallel slot${slots.n === 1 ? '' : 's'} (${slots.env}): the rest wait in ${engName}'s queue.`);
     else if (!memOK) push('crit', wl.retention === 'gpu'
       ? `Keeping every user's session in GPU memory needs ${sessionsPerRep} sessions per replica; ${maxSessions} fit.`
       : `${sessionsPerRep} concurrent sessions per replica need ${fmtGB(kv.shared + sessionsPerRep * kv.perSession)} of KV cache; ${fmtGB(kvAvail)} available.`);
@@ -321,21 +431,30 @@ const Engine = (() => {
     if (at && at.saturated) push('crit', `Prefill saturates the replica: prompts arrive faster than ${fmtTok(reqFlops / (2 * model.active * 1e9))}-token prefills can be computed. Add compute or cache more of the prompt.`);
     if (tpCross) push('warn', p.net.gbps > 0 ? `Tensor parallel spans ${Math.ceil(tp / p.nodeGpus)} nodes; every layer's all-reduce crosses the network.` : 'Tensor parallel spans nodes but no inter-node network is configured.');
     if (ppCross && !tpCross && p.net.gbps === 0) push('crit', 'The layout needs more than one node but no inter-node network is configured.');
-    if (kvRepl > 1) push('warn', `KV cache is replicated ${kvRepl}× across tensor-parallel ranks (${mla ? 'MLA has a single latent head' : `${model.nKv} KV heads < TP ${tp}`}). Enable data-parallel attention or lower TP.`);
-    if (pk.support === 'weight-only') push('info', `${PREC_LABEL[p.wPrec]} compute is not native on ${hw.name}: quantized weights save memory but matmuls run in BF16.`);
+    if (kvRepl > 1) push('warn', `KV cache is replicated ${kvRepl}× across tensor-parallel ranks (${mla ? 'MLA has a single latent head' : `${model.nKv} KV heads < TP ${tp}`}). ${sv.dpAttention ? 'Enable data-parallel attention or lower TP.' : 'Lower TP.'}`);
+    if (fits && capLimit === 'max-batch') push('info', `${engName} takes at most ${maxBatch.toLocaleString('en-US')} concurrent requests per replica by default (${(sv.maxBatch || {}).name || 'batch limit'}); memory would allow ${memSessions.toLocaleString('en-US')}. Raise it to use the room.`);
+    const gatedTxt = eff.gated.filter((k) => k !== 'dpAttention' || tp > 1).map((k) => OPT_NAMES[k]);
+    if (gatedTxt.length) push('info', `${engName} has no ${gatedTxt.join(', ')}; ${gatedTxt.length > 1 ? 'they count' : 'it counts'} as off${eff.gated.includes('retention') ? ' (idle sessions are evicted instead)' : ''}.`);
+    if (sv.prefixCache === 'per-slot' && prefix > 0) push('info', `${engName} reuses the shared prefix within each slot, so it is not prefilled again, but every session stores its own copy.`);
+    if (seqPP && pp > 1) push('info', `${engName} splits the layers across ${pp} accelerators: their memory adds up, their speed does not (a token passes them one after another).`);
+    if (slots && fits && R > 1) push('info', `${R} ${engName} servers behind a load balancer, ${slots.n} parallel slot${slots.n === 1 ? '' : 's'} each.`);
+    if (slots && fits && slots.unused > 0.25 * kvAvail) push('info', `${fmtGB(slots.unused)} of KV memory per server stays unused: raise ${slots.env} to serve more requests at once.`);
+    if (covers === 'unknown' && eng) push('info', `${engName} support is not checked for custom hardware without a chip generation.`);
+    if (pk.support === 'weight-only') push('info', `${precLabel(p.wPrec, p.engine)} compute is not native on ${hw.name}: quantized weights save memory but matmuls run in BF16.`);
     const nk = nativeKey(model);
-    if (nk && BYTES_W[nk] != null && BYTES_W[p.wPrec] > BYTES_W[nk]) push('info', `The checkpoint ships in ${model.nativePrec}; serving it in ${PREC_LABEL[p.wPrec]} upcasts the weights to ${(BYTES_W[p.wPrec] / BYTES_W[nk]).toFixed(1)}× the bytes without a quality gain.`);
-    else if (nk && BYTES_W[nk] != null && BYTES_W[p.wPrec] < BYTES_W[nk]) push('info', `Needs a ${PREC_LABEL[p.wPrec]} checkpoint or on-the-fly quantization: the official weights ship in ${model.nativePrec}.`);
+    if (nk && BYTES_W[nk] != null && BYTES_W[p.wPrec] > BYTES_W[nk]) push('info', `The checkpoint ships in ${model.nativePrec}; serving it in ${precLabel(p.wPrec, p.engine)} upcasts the weights to ${(BYTES_W[p.wPrec] / BYTES_W[nk]).toFixed(1)}× the bytes without a quality gain.`);
+    else if (nk && BYTES_W[nk] != null && BYTES_W[p.wPrec] < BYTES_W[nk]) push('info', `Needs a ${precLabel(p.wPrec, p.engine)} checkpoint or on-the-fly quantization: the official weights ship in ${model.nativePrec}.`);
     if (p.count != null && p.count - total > 0) push('info', `${p.count - total} of ${p.count} accelerators are idle in this layout.`);
-    if (wl.retention === 'host' && hostCoverage < 1) push('warn', `Host memory keeps ${hostSessions} of ${idleUsers} idle sessions warm; the rest re-prefill their full context on the next turn.`);
+    if (wl.retention === 'host' && hostCoverage < 1) push('warn', `Host memory keeps ${hostSessions} of ${idleUsers} idle sessions warm${sv.hostCacheGB != null ? ` (${engName} caches at most ${fmtGB(sv.hostCacheGB * 1e9)} per server)` : ''}; the rest re-prefill their full context on the next turn.`);
     if (wl.retention === 'none' && wl.users > B) push('info', 'Idle sessions are evicted: every turn re-prefills the whole conversation (cold TTFT applies).');
     if (at && at.pdGpus > 0) push('info', `Prefill/decode disaggregation adds ${at.pdGpus} prefill accelerators per replica.`);
 
     return {
-      hw, model, tp, pp, R, G, total, nodes, gpusUsed, pdTotal, count: p.count,
-      W, denseBytes, expertBytes, overhead, capPerGpu, kvAvailRaw, kvAvail, kvRepl,
-      C, S, kv, maxSessions, fits, memOK, speedOK, B, bPerRep, sessionsPerRep, residentUsers,
-      hostSessions, hostCoverage, idleUsers, bSpeed, bCap, maxConc, maxUsers, maxCtxAtLoad,
+      hw, model, tp, pp, R, G, total, nodes, gpusUsed, pdTotal, count: p.count, engine: p.engine || 'none', sv, covers,
+      effective: { opt, retention: wl.retention, dpAttention: eff.dpAttention }, gated: eff.gated,
+      W, denseBytes, expertBytes, overhead, capPerGpu, kvAvailRaw, kvAvail, kvRepl, poolTokens,
+      C, S, Scomp, kv, memSessions, maxSessions, slots, slotLimited, maxBatch, fits, memOK, speedOK, B, bPerRep, bAt, sessionsPerRep, residentUsers,
+      hostSessions, hostCoverage, idleUsers, bSpeed, bCap, maxConc, maxUsers, maxCtxAtLoad, capLimit, seqPP, computeGpus,
       at, ttft, ttftOK, ttftMax, ttftCold: cold.t, ttftWarm: warm.t + restoreS, restoreS, warmNew, coldNew, reqFlops, cap, pk,
       price, costPerMTok, kW, aggTotal, warnings, tpCross, ppCross, loadable,
       loadAt, decodeStep, solveMaxCtx,
@@ -343,15 +462,16 @@ const Engine = (() => {
   }
 
   /* ---------- layout search for a fixed accelerator count ---------- */
-  function layouts(model, count, nodeGpus, allowCrossTp) {
+  function layouts(model, count, nodeGpus, allowCrossTp, engine) {
+    const sv = servingOf(engine);
     const out = [];
     for (const tp of TP_CANDIDATES) {
-      if (tp > count) break;
+      if (tp > count || tp > sv.maxTp) break;
       if (model.nHeads % tp !== 0) continue;
       if (tp > nodeGpus && !allowCrossTp) continue;
       for (const pp of PP_CANDIDATES) {
         const G = tp * pp;
-        if (G > count || pp > model.layers) break;
+        if (G > count || pp > model.layers || (!sv.multiNode && G > nodeGpus)) break;
         out.push({ tp, pp, replicas: Math.floor(count / G) });
       }
     }
@@ -370,7 +490,7 @@ const Engine = (() => {
   function autoConfig(p) {
     const model = norm(p.model);
     let best = null; const tried = [];
-    for (const l of layouts(model, p.count, p.nodeGpus, p.allowCrossTp)) {
+    for (const l of layouts(model, p.count, p.nodeGpus, p.allowCrossTp, p.engine)) {
       const r = evaluate(Object.assign({}, p, l));
       tried.push(r);
       if (better(r, best)) best = r;
@@ -378,21 +498,24 @@ const Engine = (() => {
     return { best, tried };
   }
 
-  /* smallest layout (tp × pp) on which the model loads with one session of `ctx` tokens */
-  function minGpus(hw, model0, wPrec, kvPrec, ctx, adv0) {
+  /* smallest layout (tp × pp) on which the model loads with one session of `ctx` tokens (a slot engine: its slots, each of `ctx`) */
+  function minGpus(hw, model0, wPrec, kvPrec, ctx, adv0, o = {}) {
     const model = norm(model0), adv = Object.assign({}, DEFAULT_ADV, adv0 || {});
-    if (formatSupport(hw, wPrec, adv.engine) === 'unsupported' || kvSupport(hw, kvPrec, adv.engine) !== 'supported') return null;
-    const W = weightBytes(model, wPrec), need = kvAtCtx(model, kvPrec, ctx);
+    const engine = o.engine ?? adv.engine, sv = servingOf(engine);
+    if (formatSupport(hw, wPrec, engine) === 'unsupported' || kvSupport(hw, kvPrec, engine) !== 'supported') return null;
+    const sessions = sv.batching === 'slots' ? (o.slots > 0 ? o.slots : sv.slots.default) : 1;
+    const W = weightBytes(model, wPrec, engine), need = sessions * kvAtCtx(model, kvPrec, ctx, engine);
+    const nodeGpus = Math.max(hw.nodeGpus, 1), frag = sv.paged ? adv.frag : 0;
     const cands = [];
     for (const tp of TP_CANDIDATES) {
-      if (model.nHeads % tp !== 0 || tp > Math.max(hw.nodeGpus, 1)) continue;
-      for (const pp of PP_CANDIDATES) { if (pp > model.layers) break; cands.push({ G: tp * pp, tp, pp }); }
+      if (model.nHeads % tp !== 0 || tp > nodeGpus || tp > sv.maxTp) continue;
+      for (const pp of PP_CANDIDATES) { if (pp > model.layers || (!sv.multiNode && tp * pp > nodeGpus)) break; cands.push({ G: tp * pp, tp, pp }); }
     }
     cands.sort((a, b) => a.G - b.G || b.tp - a.tp);
     for (const c of cands) {
       const overhead = adv.overheadGB * 1e9 + adv.overheadFrac * (W / c.G);
-      const kvRepl = isMla(model) ? 1 : Math.max(1, c.tp / model.nKv);
-      const avail = (c.G * (hw.mem * 1e9 * adv.util - overhead) - W) * (1 - adv.frag) / kvRepl;
+      const kvRepl = isMla(model) ? (sv.dpAttention ? 1 : c.tp) : Math.max(1, c.tp / model.nKv);
+      const avail = (c.G * (hw.mem * 1e9 * adv.util - overhead) - W) * (1 - frag) / kvRepl;
       if (avail >= need) return c;
     }
     return null;
@@ -407,37 +530,51 @@ const Engine = (() => {
     if (Math.abs(a.ttft - b.ttft) > 1e-3) return a.ttft < b.ttft;
     return a.at.perUser > b.at.perUser;
   }
+  const MAX_GPUS = 100000;               // reverse sizing gives up beyond this many accelerators
+  /* Why the largest replica count tried for one layout still fails (memory per replica is fine by then). */
+  function failReason(r, wl) {
+    if (!r.ttftOK) return `Fits, but prefilling ${fmtTok(r.warmNew)} tokens takes ${fmtTime(r.ttft)} on TP ${r.tp}, over the ${fmtTime(r.ttftMax)} limit.`;
+    if (r.at && r.at.saturated) return `Fits, but prefill saturates every replica: prompts of ${fmtTok(r.warmNew)} tokens arrive faster than they can be computed.`;
+    if (r.at && r.at.perUser < wl.target) return `Fits, but a ${fmtTok(wl.ctx)}-token session cannot reach ${wl.target} tok/s per user (${r.at.perUser.toFixed(1)} tok/s alone).`;
+    return `Needs more than ${MAX_GPUS.toLocaleString('en-US')} accelerators.`;
+  }
   function reverse(p, hardwareList) {
-    const model = norm(p.model), wl = p.wl;
+    const model = norm(p.model), wl = p.wl, eff = effective(p), sv = eff.sv;
     const B = Math.max(1, Math.round(wl.users * wl.activity));
+    const demand = eff.retention === 'gpu' ? wl.users : B;   // sessions a replica set must hold
     const results = [];
     for (const hw of hardwareList) {
       const nodeGpus = hw.nodeGpus;
-      let best = null, reason = 'Model does not fit on any layout up to 512 accelerators.';
-      if (formatSupport(hw, p.wPrec, p.engine) === 'unsupported') { results.push({ hw, infeasible: true, reason: `${PREC_LABEL[p.wPrec]} weights are not loadable on this accelerator (${(ARCHS_[hw.arch] || {}).name || 'unknown generation'})${p.engine && p.engine !== 'none' ? ' with ' + ENGINES_[p.engine].name : ''}.` }); continue; }
+      let best = null, reason = sv.multiNode ? 'Model does not fit on any layout up to 512 accelerators per replica.'
+        : `Model does not fit in one ${nodeGpus}-accelerator node, and ${(engineOf(p.engine) || {}).name} serves a model within one node.`;
+      const archName = (ARCHS_[hw.arch] || {}).name || 'unknown generation';
+      if (engineCovers(hw, p.engine) === 'no') { results.push({ hw, infeasible: true, reason: `${ENGINES_[p.engine].name} does not run on ${archName}; per its docs it runs on ${familyNames(ENGINES_[p.engine].families)}.` }); continue; }
+      if (formatSupport(hw, p.wPrec, p.engine) === 'unsupported') { results.push({ hw, infeasible: true, reason: `${PREC_LABEL[p.wPrec]} weights are not loadable on ${archName}${engineOf(p.engine) ? ' with ' + ENGINES_[p.engine].name : ''}.` }); continue; }
       if (kvSupport(hw, p.kvPrec, p.engine) !== 'supported') { results.push({ hw, infeasible: true, reason: `${ENGINES_[p.engine].name} has no ${KV_LABEL[p.kvPrec]} KV cache on this accelerator.` }); continue; }
       for (const tp of TP_CANDIDATES) {
+        if (tp > sv.maxTp) break;
         if (model.nHeads % tp !== 0) continue;
         if (tp > nodeGpus && !p.allowCrossTp) continue;
         for (const pp of PP_CANDIDATES) {
           const G = tp * pp;
-          if (pp > model.layers || G > 512) break;
-          const r1 = evaluate(Object.assign({}, p, { hw, nodeGpus, link: hw.link, tp, pp, replicas: 1, count: G }));
-          if (!r1.fits) continue;
-          if (!r1.ttftOK) { reason = `Fits, but prefilling ${fmtTok(r1.warmNew)} tokens takes ${fmtTime(r1.ttft)} on TP ${tp}, over the ${fmtTime(r1.ttftMax)} limit.`; continue; }
-          let R;
-          if (wl.retention === 'gpu') {
-            const perRep = Math.min(r1.maxSessions, Math.floor(r1.bSpeed / wl.activity));
-            if (perRep < 1) { reason = `Fits, but ${fmtTok(wl.ctx)} sessions cannot reach ${wl.target} tok/s per user.`; continue; }
-            R = Math.ceil(wl.users / perRep);
-          } else {
-            const perRep = Math.min(r1.maxSessions, r1.bSpeed);
-            if (perRep < 1) { reason = `Fits, but a ${fmtTok(wl.ctx)}-token session cannot reach ${wl.target} tok/s per user (${r1.at ? r1.at.perUser.toFixed(1) : '?'} tok/s alone).`; continue; }
-            R = Math.ceil(B / perRep);
+          if (pp > model.layers || G > 512 || (!sv.multiNode && G > nodeGpus)) break;
+          const at = (R) => evaluate(Object.assign({}, p, { hw, nodeGpus, link: hw.link, tp, pp, replicas: R, count: G * R }));
+          const ok = (r) => r.memOK && r.speedOK;
+          const r1 = at(1);
+          if (!r1.fits) continue;                  // memory per replica does not depend on the replica count
+          // Feasibility only improves with more replicas (fewer requests each, more host RAM, less prefill per replica),
+          // so search for the smallest feasible R upward from the memory bound.
+          let lo = Math.max(0, Math.ceil(demand / r1.maxSessions) - 1), hi = lo + 1;
+          if (best && G * hi > best.gpusUsed) continue;   // cannot beat the best layout found so far
+          let rHi = hi === 1 ? r1 : at(hi), last = rHi;
+          while (!ok(rHi)) {
+            lo = hi; hi *= 2;
+            if (G * hi > MAX_GPUS || (best && G * lo >= best.gpusUsed)) { rHi = null; break; }
+            last = rHi = at(hi);
           }
-          const r = evaluate(Object.assign({}, p, { hw, nodeGpus, link: hw.link, tp, pp, replicas: R, count: G * R }));
-          if (!(r.memOK && r.speedOK)) continue;
-          if (betterRev(r, best)) best = r;
+          if (!rHi) { if (!best) reason = failReason(last, wl); continue; }
+          while (hi - lo > 1) { const mid = Math.floor((lo + hi) / 2); const rm = at(mid); if (ok(rm)) { hi = mid; rHi = rm; } else lo = mid; }
+          if (betterRev(rHi, best)) best = rHi;
         }
       }
       results.push(best ? Object.assign(best, { infeasible: false }) : { hw, infeasible: true, reason });
@@ -473,9 +610,10 @@ const Engine = (() => {
     return (s / 3600).toFixed(1) + ' h';
   }
 
-  return { BYTES_W, BYTES_KV, W_PRECS, KV_PRECS, PREC_LABEL, KV_LABEL, DEFAULT_ADV, TP_CANDIDATES, PP_CANDIDATES,
+  return { BYTES_W, BYTES_KV, W_PRECS, KV_PRECS, PREC_LABEL, KV_LABEL, DEFAULT_ADV, TP_CANDIDATES, PP_CANDIDATES, MAX_GPUS, SERVING_FULL,
     norm, isMla, weightBytes, expertSplit, touched, kvSplit, kvAtCtx, kvPerTokenFull, attnFlopsPerTok, prefillAttnFlops, peakFlops,
-    formatSupport, hwSupport, kvSupport, familyOf, evaluate, autoConfig, layouts, minGpus, reverse, fmtTok, fmtGB, fmtTime };
+    formatSupport, hwSupport, kvSupport, familyOf, familyNames, engineCovers, servingOf, effective, bytesW, bytesKv, precLabel, kvLabel, maxBatchOf,
+    evaluate, autoConfig, layouts, minGpus, reverse, fmtTok, fmtGB, fmtTime };
 })();
 
 if (typeof module !== 'undefined') module.exports = Engine;

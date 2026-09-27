@@ -1,30 +1,12 @@
-/* app.js — UI for AI Fit. Depends on catalog.js and engine.js (classic scripts, loaded before this one). */
+/* app.js - UI for AI Fit. Depends on catalog.js, glossary.js, engine.js and common.js (classic scripts, loaded before this one). */
 (() => {
   'use strict';
   const E = Engine;
   const { fmtTok, fmtGB, fmtTime } = E;
+  const { h, s, fmtNum, fmtMoney, fmtTokS, pct, plural, LS, store, ctxToSlider, sliderToCtx } = Common;
   const $ = (sel, el = document) => el.querySelector(sel);
   const $$ = (sel, el = document) => Array.from(el.querySelectorAll(sel));
 
-  /* ---------- tiny DOM helpers ---------- */
-  function h(tag, attrs, ...kids) {
-    const el = document.createElement(tag);
-    if (attrs) for (const [k, v] of Object.entries(attrs)) {
-      if (v == null || v === false) continue;
-      if (k === 'class') el.className = v;
-      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-      else el.setAttribute(k, v === true ? '' : v);
-    }
-    for (const kid of kids.flat(Infinity)) { if (kid == null || kid === false) continue; el.append(kid.nodeType ? kid : document.createTextNode(String(kid))); }
-    return el;
-  }
-  const SVG = 'http://www.w3.org/2000/svg';
-  function s(tag, attrs, ...kids) {
-    const el = document.createElementNS(SVG, tag);
-    if (attrs) for (const [k, v] of Object.entries(attrs)) { if (v != null) el.setAttribute(k, v); }
-    for (const kid of kids.flat(Infinity)) { if (kid == null) continue; el.append(kid.nodeType ? kid : document.createTextNode(String(kid))); }
-    return el;
-  }
   /* ---------- glossary tooltips ---------- */
   const T = (key, text) => (GLOSSARY[key] ? h('span', { class: 'term', 'data-term': key, tabindex: 0 }, text) : document.createTextNode(text));
   function initTooltips() {
@@ -61,74 +43,17 @@
     const entries = Object.values(GLOSSARY).sort((a, b) => a.t.localeCompare(b.t));
     el.replaceChildren(...entries.map((g) => [h('dt', null, g.t), h('dd', null, g.d, g.typ ? h('div', { class: 'gmeta' }, h('i', null, 'Typical '), g.typ) : null, g.lo ? h('div', { class: 'gmeta' }, h('i', null, 'Low '), g.lo) : null, g.hi ? h('div', { class: 'gmeta' }, h('i', null, 'High '), g.hi) : null)]).flat());
   }
-  const fmtNum = (n, d = 0) => (n == null || !isFinite(n)) ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: d });
-  const fmtMoney = (n, d = 2) => (n == null || !isFinite(n)) ? '—' : '$' + n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-  const fmtTokS = (n) => (n == null || !isFinite(n)) ? '—' : (n >= 100 ? fmtNum(n) : n.toFixed(1));
-  const pct = (x) => Math.round(x * 100) + '%';
-  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-  /* ---------- persistence and catalogs ---------- */
-  const LS = {
-    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
-    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode etc. */ } },
-    del(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } },
-  };
-  let customHw = LS.get('cb.customHardware', []);
-  let customModels = LS.get('cb.customModels', []);
-  const allHardware = () => HARDWARE.concat(customHw);
-  const allModels = () => MODELS.concat(customModels);
-  const hwById = (id) => allHardware().find((x) => x.id === id) || HARDWARE.find((x) => x.id === 'h100-sxm');
-  const modelById = (id) => allModels().find((x) => x.id === id) || MODELS.find((x) => x.id === 'llama-3.3-70b');
-
-  const ACTIVITY = { chat: 10, assist: 25, agents: 60, batch: 100 };
-  const DEFAULTS = {
-    mode: 'forward', hw: 'h100-sxm', count: 8, nodeGpus: 8, link: 'auto', net: 'ib3200', hostRam: 1024,
-    model: 'llama-3.3-70b', wPrec: 'bf16', kvPrec: 'fp8', engine: 'vllm', par: 'auto', tp: 8, pp: 1, reps: 1, dpAttn: false,
-    users: 50, activityPreset: 'assist', activity: 25, ctx: 131072, prefix: 2048, newPrompt: 1000, output: 500, retention: 'host', target: 20, ttftMax: 30,
-    prefixCache: true, spec: false, specK: 4, specAlpha: 70, pd: false, allowCrossTp: false,
-    candidates: ['h100-sxm', 'h200-sxm', 'b200', 'b300', 'gb200', 'mi300x', 'mi325x', 'mi355x', 'l40s', 'rtx-pro-6000', 'a100-sxm-80', 'rtx-4090'],
-    compatCtx: 32768,
-    adv: { util: 90, overheadGB: 1.5, overheadFrac: 4, bwEff: 75, mfu: 50, frag: 4, ppBubble: 10, collEff: 70, hostRestoreGBs: 20 },
-  };
-  let state = Object.assign({}, DEFAULTS, LS.get('cb.state', {}));
-  state.adv = Object.assign({}, DEFAULTS.adv, state.adv || {});
-
-  /* ---------- parameters for the engine ---------- */
-  function params(overrides) {
-    const st = Object.assign({}, state, overrides || {});
-    st.adv = Object.assign({}, state.adv, (overrides && overrides.adv) || {});
-    const hw = hwById(st.hw), model = modelById(st.model);
-    const net = NETWORKS.find((n) => n.id === st.net) || NETWORKS[0];
-    return {
-      hw, model, wPrec: st.wPrec, kvPrec: st.kvPrec, engine: st.engine || 'none',
-      count: Math.max(1, st.count | 0), nodeGpus: Math.max(1, st.nodeGpus | 0),
-      link: st.link === 'auto' ? hw.link : st.link, net, hostRamGB: Math.max(0, +st.hostRam || 0),
-      dpAttention: !!st.dpAttn, allowCrossTp: !!st.allowCrossTp,
-      tp: Math.max(1, st.tp | 0), pp: Math.max(1, st.pp | 0), replicas: Math.max(1, st.reps | 0),
-      wl: {
-        users: Math.max(1, st.users | 0), activity: Math.min(1, Math.max(0.01, (+st.activity || 1) / 100)),
-        ctx: Math.max(256, st.ctx | 0), prefix: Math.max(0, st.prefix | 0), newPrompt: Math.max(1, st.newPrompt | 0),
-        output: Math.max(1, st.output | 0), retention: st.retention, target: Math.max(0.1, +st.target || 1), ttftMax: Math.max(0.1, +st.ttftMax || 30),
-      },
-      opt: { prefixCache: !!st.prefixCache, spec: !!st.spec, pd: !!st.pd },
-      adv: {
-        util: st.adv.util / 100, overheadGB: +st.adv.overheadGB, overheadFrac: st.adv.overheadFrac / 100, bwEff: st.adv.bwEff / 100,
-        mfu: st.adv.mfu / 100, frag: st.adv.frag / 100, ppBubble: st.adv.ppBubble / 100, collEff: st.adv.collEff / 100,
-        hostRestoreGBs: +st.adv.hostRestoreGBs, specK: Math.max(1, st.specK | 0), specAlpha: Math.min(0.99, Math.max(0.05, st.specAlpha / 100)), engine: st.engine || 'none',
-      },
-    };
-  }
-  function run(overrides) {
-    const p = params(overrides);
-    const st = Object.assign({}, state, overrides || {});
-    if (st.par === 'manual') return { best: E.evaluate(p), tried: [] };
-    return E.autoConfig(p);
-  }
+  /* ---------- state and catalogs ---------- */
+  const allHardware = store.hardware, allModels = store.models;
+  let state = Common.freshState(LS.get('cb.state', {}));
+  const params = (overrides) => Common.buildParams(state, overrides);
+  const run = (overrides) => Common.runPlan(state, overrides);
 
   /* ---------- controls ---------- */
   const BIND = [
     ['hw', 'hw', 'str'], ['count', 'count', 'int'], ['nodeGpus', 'nodeGpus', 'int'], ['link', 'link', 'str'], ['net', 'net', 'str'], ['hostRam', 'hostRam', 'num'],
-    ['model', 'model', 'str'], ['engine', 'engine', 'str'], ['wPrec', 'wPrec', 'str'], ['kvPrec', 'kvPrec', 'str'], ['par', 'par', 'str'], ['tp', 'tp', 'int'], ['pp', 'pp', 'int'], ['reps', 'reps', 'int'], ['dpAttn', 'dpAttn', 'bool'],
+    ['model', 'model', 'str'], ['engine', 'engine', 'str'], ['slots', 'slots', 'int'], ['wPrec', 'wPrec', 'str'], ['kvPrec', 'kvPrec', 'str'], ['par', 'par', 'str'], ['tp', 'tp', 'int'], ['pp', 'pp', 'int'], ['reps', 'reps', 'int'], ['dpAttn', 'dpAttn', 'bool'],
     ['users', 'users', 'int'], ['activityPreset', 'activityPreset', 'str'], ['activity', 'activity', 'num'], ['ctx', 'ctx', 'int'], ['prefix', 'prefix', 'int'], ['newPrompt', 'newPrompt', 'int'], ['output', 'output', 'int'], ['retention', 'retention', 'str'], ['target', 'target', 'num'], ['ttftMax', 'ttftMax', 'num'],
     ['prefixCache', 'prefixCache', 'bool'], ['spec', 'spec', 'bool'], ['specK', 'specK', 'int'], ['specAlpha', 'specAlpha', 'num'], ['pd', 'pd', 'bool'], ['allowCrossTp', 'allowCrossTp', 'bool'],
     ['compatCtx', 'compatCtx', 'int'],
@@ -137,8 +62,6 @@
   ];
   const getPath = (obj, path) => path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
   const setPath = (obj, path, v) => { const ks = path.split('.'); let o = obj; for (const k of ks.slice(0, -1)) { if (o[k] == null) o[k] = {}; o = o[k]; } o[ks[ks.length - 1]] = v; };
-  const ctxToSlider = (c) => Math.round(Math.log2(Math.max(1024, c) / 1024) * 100);
-  const sliderToCtx = (pos) => { const c = 1024 * Math.pow(2, pos / 100); const step = c >= 1e6 ? 65536 : c >= 131072 ? 16384 : c >= 32768 ? 4096 : 1024; return Math.max(1024, Math.round(c / step) * step); };
 
   function populateSelects() {
     const hwSel = $('#hw'); hwSel.replaceChildren();
@@ -170,13 +93,55 @@
       }
     }
   }
-  const SUPPORT_TXT = { native: 'native', 'weight-only': 'weight-only, compute in BF16', unsupported: 'not loadable' };
+  const SUPPORT_TXT = { native: 'native', 'weight-only': 'weight-only', unsupported: 'not loadable' };
+  const engineOf = (id) => ENGINES[id] || ENGINES.none;
   function labelPrecOptions(hw) {
-    const eng = state.engine || 'none';
-    for (const opt of $$('#wPrec option')) opt.textContent = hw ? `${E.PREC_LABEL[opt.value]} — ${SUPPORT_TXT[E.formatSupport(hw, opt.value, eng)]}` : E.PREC_LABEL[opt.value];
-    for (const opt of $$('#kvPrec option')) opt.textContent = hw ? `${E.KV_LABEL[opt.value]} — ${E.kvSupport(hw, opt.value, eng) === 'supported' ? 'supported' : 'not in ' + ENGINES[eng].name}` : (eng !== 'none' && !(ENGINES[eng].kvCache || {})[opt.value] && opt.value !== 'bf16' ? `${E.KV_LABEL[opt.value]} — not in ${ENGINES[eng].name}` : E.KV_LABEL[opt.value]);
-    const e = ENGINES[eng];
-    $('#engineHint').replaceChildren(e.docs ? h('span', null, `Per ${e.name} docs (${e.version}), checked ${e.checked}${e.unverified ? ', not re-verified' : ''}: `, h('a', { href: e.docs.weights, target: '_blank', rel: 'noopener' }, 'weights'), ', ', h('a', { href: e.docs.kv, target: '_blank', rel: 'noopener' }, 'KV cache'), '. The planner takes the weaker of engine support and silicon capability.') : h('span', null, e.note || ''));
+    const eng = ENGINES[state.engine] ? state.engine : 'none', e = engineOf(eng);
+    for (const opt of $$('#engine option')) {
+      const other = engineOf(opt.value);
+      opt.textContent = other.name + (hw && E.engineCovers(hw, opt.value) === 'no' ? ` - not on ${((ARCHS[hw.arch] || {}).name || hw.name).replace(/ \(.*\)$/, '')}` : '');
+    }
+    for (const opt of $$('#wPrec option')) opt.textContent = hw ? `${E.precLabel(opt.value, eng)} - ${SUPPORT_TXT[E.formatSupport(hw, opt.value, eng)]}` : E.precLabel(opt.value, eng);
+    for (const opt of $$('#kvPrec option')) opt.textContent = hw ? `${E.kvLabel(opt.value, eng)} - ${E.kvSupport(hw, opt.value, eng) === 'supported' ? 'supported' : 'not in ' + e.name}` : (eng !== 'none' && !(e.kvCache || {})[opt.value] && opt.value !== 'bf16' ? `${E.kvLabel(opt.value, eng)} - not in ${e.name}` : E.kvLabel(opt.value, eng));
+    $('#engineHint').replaceChildren(...engineHint(eng, hw));
+    syncEngineControls(eng);
+  }
+  const extLink = (url, text) => (url ? h('a', { href: url, target: '_blank', rel: 'noopener' }, text) : text);
+  /* What the engine's docs say it supports, and how it serves requests, with the sources. */
+  function engineHint(eng, hw) {
+    const e = engineOf(eng);
+    if (!e.docs) return [h('span', null, e.note || '')];
+    const sv = E.servingOf(eng), src = sv.sources || {};
+    const out = [h('span', null, `Per ${e.name} docs (${e.version}), checked ${e.checked}${e.unverified ? ', not re-verified' : ''}: `, extLink(e.docs.weights, 'weights'), ', ', extLink(e.docs.kv, 'KV cache'), '. The planner takes the weaker of engine support and silicon capability. ')];
+    if (e.families) out.push(h('span', null, e.families.length === ENGINE_FAMILIES.length ? 'Runs on every accelerator family in the catalog' : `Runs on ${E.familyNames(e.families)}`, e.familiesSource ? [' (', extLink(e.familiesSource.url, 'source'), ')'] : null, '. '));
+    if (sv.batching === 'slots') out.push(h('span', null, `${sv.slots.default} parallel request${sv.slots.default === 1 ? '' : 's'} per server by default (`, h('code', null, sv.slots.env), '), every slot reserving its full context when the model loads (', extLink(src.slots, 'config'), ', ', extLink(src.memory, 'FAQ'), '). '));
+    else if (sv.maxBatch) {
+      const mb = sv.maxBatch;
+      const n = mb.value ? fmtNum(mb.value) : mb.tiers ? (hw ? fmtNum(E.maxBatchOf(sv, hw, 0, null)) : `${fmtNum(mb.tiers[0].value)} or ${fmtNum(mb.default)}`) : `${fmtNum(mb.min)} to ${fmtNum(mb.max)}`;
+      out.push(h('span', null, `Continuous batching over a paged KV cache, at most ${n} concurrent requests per replica by default (`, h('code', null, mb.name), ', ', extLink(src.maxBatch, 'source'), '). '));
+    }
+    if (sv.pp === 'sequential') out.push(h('span', null, 'Spreads a model over the GPUs of one node by layers, one after another: no tensor parallelism (', extLink(src.split, 'source'), '). '));
+    if (sv.prefixCache === 'per-slot') out.push(h('span', null, 'Reuses prompt prefixes within a slot, not across sessions. '));
+    if (sv.hostCacheGB != null) out.push(h('span', null, `Parks idle sessions in a ${fmtGB(sv.hostCacheGB * 1e9)} host prompt cache per server (`, extLink(src.host, 'source'), '). '));
+    if (sv.queueMax) out.push(h('span', null, `Queues ${sv.queueMax} requests, then rejects more (`, h('code', null, sv.queueEnv), ').'));
+    return out;
+  }
+  const GATE_NAMES = { prefixCache: 'prefix sharing across sessions', spec: 'speculative decoding', pd: 'prefill/decode disaggregation', dpAttn: 'data-parallel attention' };
+  /* Inputs for optimizations the engine lacks are disabled (the saved state keeps its value); the parallel-slots field
+   * shows for slot engines only. */
+  function syncEngineControls(eng) {
+    const sv = E.servingOf(eng), name = engineOf(eng).name;
+    $('#slotsField').hidden = sv.batching !== 'slots';
+    const off = [];
+    for (const [id, ok] of [['prefixCache', sv.prefixCache === true], ['spec', !!sv.spec], ['pd', !!sv.pd], ['dpAttn', !!sv.dpAttention]]) {
+      const el = document.getElementById(id);
+      el.disabled = !ok;
+      if (!ok) off.push(GATE_NAMES[id]);
+    }
+    for (const opt of $$('#retention option')) opt.disabled = !sv.retention.includes(opt.value);
+    const hint = $('#optHint');
+    hint.hidden = !off.length;
+    hint.textContent = off.length ? `${name} has no ${off.join(', ').replace(/, ([^,]*)$/, ' or $1')}; those switches count as off.${sv.prefixCache === 'per-slot' ? ' It reuses prompt prefixes within each slot on its own.' : ''}` : '';
   }
   const VENDOR_ORGS = ['RedHatAI', 'neuralmagic', 'nvidia', 'amd', 'Intel', 'hugging-quants', 'mistral-community'];
   function checkpointFor(model, prec) {
@@ -189,6 +154,7 @@
     return { repo, org, kind };
   }
   function checkpointNode(model, prec) {
+    if (state.engine === 'ollama') return h('span', null, `Ollama loads GGUF files: pull the model from the Ollama library or a GGUF repository on Hugging Face in ${E.precLabel(prec, 'ollama').replace(' (GGUF)', '')}; AWQ, GPTQ and FP8 checkpoints do not apply.`);
     const c = checkpointFor(model, prec);
     if (!c) return h('span', null, `No known ${E.PREC_LABEL[prec]} checkpoint for this model: quantize it yourself (llm-compressor, NVIDIA ModelOpt, AutoAWQ) or pick another format.`);
     return h('span', null, `${E.PREC_LABEL[prec]} checkpoint: `, h('a', { href: 'https://huggingface.co/' + c.repo, target: '_blank', rel: 'noopener' }, c.repo), ' ', h('span', { class: 'chip ' + (c.kind === 'official' ? 'good' : c.kind === 'vendor' ? 'info' : 'warn') }, c.kind));
@@ -224,11 +190,11 @@
     $('#specOpts').hidden = !state.spec;
     $$('#candidates input').forEach((c) => { c.checked = state.candidates.includes(c.dataset.id); });
   }
-  function afterChange(id, v) {
-    if (id === 'hw') { const hw = hwById(v); state.nodeGpus = hw.nodeGpus; state.link = 'auto'; $('#nodeGpus').value = hw.nodeGpus; $('#link').value = 'auto'; }
-    if (id === 'model') { const m = E.norm(modelById(v)); state.dpAttn = E.isMla(m); $('#dpAttn').checked = state.dpAttn; }
-    if (id === 'activityPreset' && ACTIVITY[v] != null) { state.activity = ACTIVITY[v]; $('#activity').value = ACTIVITY[v]; }
-    if (id === 'activity') { state.activityPreset = 'custom'; $('#activityPreset').value = 'custom'; }
+  function afterChange(id, key, v) {
+    for (const k of Common.applyChange(state, key, v)) {       // shared side effects (hardware → node size, model → DP attention, presets)
+      const b = BIND.find(([, bk]) => bk === k), el = b && document.getElementById(b[0]);
+      if (el) { if (el.type === 'checkbox') el.checked = !!state[k]; else el.value = state[k]; }
+    }
     if (id === 'ctx') $('#ctxRange').value = ctxToSlider(v);
     if (id === 'par') $('#manualPar').hidden = v !== 'manual';
     if (id === 'spec') $('#specOpts').hidden = !v;
@@ -244,41 +210,46 @@
         if (type === 'int') { v = parseInt(v, 10); if (!isFinite(v)) return; }
         else if (type === 'num') { v = parseFloat(v); if (!isFinite(v)) return; }
         setPath(state, key, v);
-        afterChange(id, v);
+        afterChange(id, key, v);
         scheduleRender();
       });
     }
     $('#ctxRange').addEventListener('input', (e) => { state.ctx = sliderToCtx(+e.target.value); $('#ctx').value = state.ctx; scheduleRender(); });
     $$('.tab').forEach((t) => t.addEventListener('click', () => { state.mode = t.dataset.mode; scheduleRender(); }));
+    $('.tabs').addEventListener('keydown', (e) => {                // arrow keys move between tabs (WAI-ARIA tabs pattern)
+      const tabs = $$('.tab'), i = tabs.indexOf(document.activeElement);
+      if (i < 0) return;
+      const j = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+      if (j == null) return;
+      e.preventDefault();
+      const t = tabs[(j + tabs.length) % tabs.length];
+      t.focus(); state.mode = t.dataset.mode; scheduleRender();
+    });
     $('#candidates').addEventListener('change', () => { state.candidates = $$('#candidates input').filter((c) => c.checked).map((c) => c.dataset.id); scheduleRender(); });
     $('#candAll').addEventListener('click', () => { state.candidates = allHardware().map((x) => x.id); syncInputs(); scheduleRender(); });
     $('#candNone').addEventListener('click', () => { state.candidates = []; syncInputs(); scheduleRender(); });
-    $('#resetInputs').addEventListener('click', () => { state = Object.assign({}, DEFAULTS, { mode: state.mode }); state.adv = Object.assign({}, DEFAULTS.adv); syncInputs(); scheduleRender(); });
+    $('#resetInputs').addEventListener('click', () => { state = Common.freshState({ mode: state.mode }); syncInputs(); scheduleRender(); });
     $('#addHw').addEventListener('click', () => addCustom('hardware'));
     $('#addModel').addEventListener('click', () => addCustom('model'));
     $('#exportJson').addEventListener('click', () => { $('#customJson').value = JSON.stringify({ hardware: allHardware(), models: allModels() }, null, 1); setMsg('Catalog JSON is in the box; copy it from there.'); });
-    $('#resetCustom').addEventListener('click', () => { customHw = []; customModels = []; LS.del('cb.customHardware'); LS.del('cb.customModels'); populateSelects(); syncInputs(); setMsg('Custom entries removed.'); scheduleRender(); });
+    $('#resetCustom').addEventListener('click', () => { store.resetCustom(); populateSelects(); syncInputs(); setMsg('Custom entries removed.'); scheduleRender(); });
   }
   function setMsg(t, bad) { const el = $('#customMsg'); el.textContent = t; el.className = 'hint ' + (bad ? 'bad' : 'good'); }
   function addCustom(kind) {
     let obj;
     try { obj = JSON.parse($('#customJson').value); } catch (e) { setMsg('That is not valid JSON: ' + e.message, true); return; }
     const list = Array.isArray(obj) ? obj : [obj];
-    const need = kind === 'hardware' ? ['id', 'name', 'mem', 'bw'] : ['id', 'name', 'params', 'layers', 'dModel', 'nHeads', 'nKv', 'dHead', 'maxCtx'];
-    for (const o of list) {
-      const missing = need.filter((k) => o[k] == null);
-      if (missing.length) { setMsg(`Entry "${o.id || '?'}" is missing: ${missing.join(', ')}`, true); return; }
-      if (kind === 'hardware') { o.vendor = o.vendor || 'Custom'; o.tflops = o.tflops || { fp16: 100 }; o.link = o.link || 'pcie5'; o.linkBw = o.linkBw || 64; o.nodeGpus = o.nodeGpus || 8; o.custom = true; }
-      else { o.family = o.family || 'Custom'; o.custom = true; }
-    }
-    if (kind === 'hardware') { customHw = customHw.filter((x) => !list.some((o) => o.id === x.id)).concat(list); LS.set('cb.customHardware', customHw); }
-    else { customModels = customModels.filter((x) => !list.some((o) => o.id === x.id)).concat(list); LS.set('cb.customModels', customModels); }
+    const err = store.addCustom(kind, list);
+    if (err) { setMsg(err, true); return; }
     populateSelects(); syncInputs(); setMsg(`Added ${list.length} ${kind} ${list.length === 1 ? 'entry' : 'entries'}. They live in this browser's storage.`); scheduleRender();
   }
 
   /* ---------- rendering ---------- */
   function render() {
-    $$('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.mode === state.mode)));
+    $$('.tab').forEach((t) => { const on = t.dataset.mode === state.mode; t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; });
+    const arcade = $('#arcadeLink');
+    arcade.hidden = !!window.claude;                               // the Claude artifact publishes the planner page only
+    arcade.href = 'arcade/index.html#' + Common.encodePlan(state);
     $$('.view').forEach((v) => { v.hidden = v.dataset.mode !== state.mode; });
     const planning = ['forward', 'reverse', 'compat'].includes(state.mode);
     $('#rail').hidden = !planning;
@@ -317,12 +288,12 @@
     // KPIs
     const a = r.at;
     const tiles = [
-      tile('Concurrent requests supported', r.fits ? fmtNum(r.maxConc) : '0', r.fits ? `≈ ${fmtNum(r.maxUsers)} users at ${pct(wl.activity)} active · you asked for ${fmtNum(r.B)}` : 'model does not load', r.fits && r.maxConc >= r.B ? 'good' : 'bad', true, 'concurrent'),
-      tile('Context per session at your load', r.fits ? fmtTok(r.maxCtxAtLoad) : '—', `${fmtNum(r.sessionsPerRep)} sessions resident per replica · model max ${fmtTok(model.maxCtx)}`, r.maxCtxAtLoad >= wl.ctx ? 'good' : 'bad', false, 'ctx-at-load'),
-      tile('Speed per user', a ? fmtTokS(a.perUser) + ' tok/s' : '—', a ? `target ≥ ${wl.target} · ${fmtTime(a.itl)} between tokens` : '', a && a.perUser >= wl.target && !a.saturated ? 'good' : 'bad', false, 'speed-per-user'),
-      tile('Aggregate throughput', a ? fmtNum(r.aggTotal) + ' tok/s' : '—', r.costPerMTok != null ? `${fmtMoney(r.costPerMTok)} per 1M output tokens at ~${fmtMoney(r.price, 0)}/h` : (r.kW ? `${fmtNum(r.kW, 1)} kW of accelerators` : ''), null, false, 'aggregate'),
-      tile('Time to first token', a ? fmtTime(r.ttft) : '—', a ? `limit ${fmtTime(wl.ttftMax)} · first turn from cold: ${fmtTime(r.ttftCold)} for ${fmtTok(r.coldNew)} tokens` : '', a ? (r.ttftOK ? 'good' : 'bad') : null, false, 'ttft'),
-      tile('KV cache per session', fmtGB(r.kv.perSession), `${fmtGB(E.kvPerTokenFull(model, p.kvPrec))}/token · pool ${fmtGB(r.kvAvail)} per replica`, null, false, 'kv-per-session'),
+      tile('Concurrent requests supported', r.fits ? fmtNum(r.maxConc) : '0', r.fits ? `≈ ${fmtNum(r.maxUsers)} users at ${pct(wl.activity)} active · you asked for ${fmtNum(r.B)}${r.capLimit === 'slots' ? ` · capped by ${plural(r.slots.n, 'parallel slot')} per server` : r.capLimit === 'max-batch' ? ` · capped by ${r.sv.maxBatch.name} = ${fmtNum(r.maxBatch)} per replica` : ''}` : 'model does not load', r.fits && r.maxConc >= r.B ? 'good' : 'bad', true, 'concurrent'),
+      tile('Context per session at your load', r.fits ? fmtTok(r.maxCtxAtLoad) : '-', `${fmtNum(r.sessionsPerRep)} sessions resident per replica · model max ${fmtTok(model.maxCtx)}`, r.maxCtxAtLoad >= wl.ctx ? 'good' : 'bad', false, 'ctx-at-load'),
+      tile('Speed per user', a ? fmtTokS(a.perUser) + ' tok/s' : '-', a ? `target ≥ ${wl.target} · ${fmtTime(a.itl)} between tokens` : '', a && a.perUser >= wl.target && !a.saturated ? 'good' : 'bad', false, 'speed-per-user'),
+      tile('Aggregate throughput', a ? fmtNum(r.aggTotal) + ' tok/s' : '-', r.costPerMTok != null ? `${fmtMoney(r.costPerMTok)} per 1M output tokens at ~${fmtMoney(r.price, 0)}/h` : (r.kW ? `${fmtNum(r.kW, 1)} kW of accelerators` : ''), null, false, 'aggregate'),
+      tile('Time to first token', a ? fmtTime(r.ttft) : '-', a ? `limit ${fmtTime(wl.ttftMax)} · first turn from cold: ${fmtTime(r.ttftCold)} for ${fmtTok(r.coldNew)} tokens` : '', a ? (r.ttftOK ? 'good' : 'bad') : null, false, 'ttft'),
+      tile('KV cache per session', fmtGB(r.kv.perSession), `${fmtGB(E.kvPerTokenFull(model, p.kvPrec, p.engine))}/token · pool ${fmtGB(r.kvAvail)} per replica`, null, false, 'kv-per-session'),
     ];
     $('#kpis').replaceChildren(...tiles);
 
@@ -339,11 +310,32 @@
   function verdictContent(r, p) {
     const wl = p.wl, model = r.model, layout = `${r.total}× ${r.hw.name}`;
     const who = `${fmtNum(wl.users)} users (${fmtNum(r.B)} concurrent at ${pct(wl.activity)} active)`;
-    if (!r.fits) {
-      const mg = E.minGpus(r.hw, model, p.wPrec, p.kvPrec, Math.min(wl.ctx, 32768), p.adv);
+    const eng = engineOf(p.engine);
+    if (!r.loadable) {
+      const why = r.warnings.find((w) => w.level === 'crit' && w.text !== (r.warnings.find((x) => /exceeds the model's maximum/.test(x.text)) || {}).text);
       return [
-        h('strong', null, `${model.name} in ${E.PREC_LABEL[p.wPrec]} does not load on ${layout}.`),
+        h('strong', null, `${model.name} in ${E.precLabel(p.wPrec, p.engine)} cannot run on ${layout}${p.engine !== 'none' ? ' with ' + eng.name : ''}.`),
+        h('p', null, why ? why.text : 'The engine has no kernels for this format on this hardware.'),
+      ];
+    }
+    if (r.slots && !r.slots.fit && r.memSessions >= 1) {
+      return [
+        h('strong', null, `${r.slots.n} parallel slots of ${fmtTok(wl.ctx)} tokens do not fit next to ${model.name} on ${layout}.`),
+        h('p', null, `${eng.name} reserves every slot's full context when the model loads: ${fmtGB(r.slots.reserved)} of KV cache, but ${fmtGB(r.kvAvail)} is free after the weights. Lower `, h('code', null, r.slots.env), ` to ${r.memSessions} or shorten the context.`),
+      ];
+    }
+    if (!r.fits) {
+      const mg = E.minGpus(r.hw, model, p.wPrec, p.kvPrec, Math.min(wl.ctx, 32768), p.adv, { engine: p.engine, slots: p.slots });
+      return [
+        h('strong', null, `${model.name} in ${E.precLabel(p.wPrec, p.engine)} does not load on ${layout}.`),
         h('p', null, `Weights take ${fmtGB(r.W)}; ${r.G} accelerators offer ${fmtGB(Math.max(0, r.G * r.capPerGpu))} after runtime overhead. `, mg ? `The smallest layout that loads it here is ${mg.G} accelerators (TP ${mg.tp} × PP ${mg.pp}) for one 32k session; lower the weight precision or pick bigger memory.` : 'No layout up to 64-way tensor × 16-stage pipeline parallelism loads it on this hardware.'),
+      ];
+    }
+    if (r.slotLimited) {
+      return [
+        h('strong', null, `${eng.name} serves ${r.slots.n * r.R} request${r.slots.n * r.R === 1 ? '' : 's'} at a time on ${layout}; ${who} need ${fmtNum(r.B)}.`),
+        h('p', null, `Each ${eng.name} server runs ${r.slots.n} parallel slot${r.slots.n === 1 ? '' : 's'} (`, h('code', null, r.slots.env), `); the other requests wait in its queue. Every slot reserves ${fmtTok(wl.ctx)} tokens of KV cache, so more slots need memory for their full context. A continuous-batching engine such as vLLM shares the same memory between all requests.`,
+          !r.ttftOK ? ` Even the requests in a slot wait ${fmtTime(r.ttft)} for their first token (limit ${fmtTime(wl.ttftMax)}): ${fmtTok(r.warmNew)} tokens are prefilled on one accelerator per turn.` : r.at && r.at.perUser < wl.target ? ` Even the requests in a slot get ${fmtTokS(r.at.perUser)} tok/s (target ${wl.target}).` : ''),
       ];
     }
     if (!r.memOK) {
@@ -378,17 +370,24 @@
     const bar = h('div', { class: 'membar', role: 'img', 'aria-label': `Memory per accelerator: weights ${fmtGB(wPer)}, KV cache ${fmtGB(kvPer)}, overhead ${fmtGB(ovh)}, headroom ${fmtGB(head)}` });
     for (const [name, val, color] of segs) if (val > 0) bar.append(h('div', { class: 'seg', style: `flex:${val};background:${color}`, title: `${name}: ${fmtGB(val)}` }));
     const key = h('ul', { class: 'key' }, segs.map(([name, val, color, term]) => h('li', null, h('i', { style: `background:${color}` }), h('span', { class: 't' }, T(term, name)), h('b', null, fmtGB(Math.max(0, val))))));
-    const layoutTxt = `TP ${r.tp} × PP ${r.pp} × ${plural(r.R, 'replica')} = ${r.total} accelerators on ${plural(r.nodes, 'node')}` + (r.count - r.total > 0 ? `, ${r.count - r.total} idle` : '') + (r.pdTotal ? `, plus ${r.pdTotal} in a prefill pool` : '');
+    const tail = ` = ${r.total} accelerators on ${plural(r.nodes, 'node')}` + (r.count - r.total > 0 ? `, ${r.count - r.total} idle` : '') + (r.pdTotal ? `, plus ${r.pdTotal} in a prefill pool` : '');
+    const unit = r.slots ? `${engineOf(p.engine).name} server` : 'replica';
+    const lead = r.seqPP
+      ? (r.pp > 1 ? [T('layer-split', 'Layer split'), ` over ${plural(r.pp, 'accelerator')} × `] : [`1 accelerator per ${unit} × `]).concat([T('replicas', plural(r.R, unit)), tail])
+      : [T('tp', 'TP'), ` ${r.tp} × `, T('pp', 'PP'), ` ${r.pp} × `, T('replicas', plural(r.R, unit)), tail];
+    const tokens = r.kvAvail / Math.max(1, E.kvPerTokenFull(r.model, p.kvPrec, p.engine));
     const out = [
-      h('p', { class: 'lead' }, T('tp', 'TP'), ` ${r.tp} × `, T('pp', 'PP'), ` ${r.pp} × `, T('replicas', plural(r.R, 'replica')), layoutTxt.slice(layoutTxt.indexOf(' ='))),
-      h('p', { class: 'hint' }, `Per accelerator (${hw.mem} GB): ${fmtGB(wPer)} weights, ${fmtGB(kvPer)} KV cache = ${fmtTok(kvPer / Math.max(1, E.kvPerTokenFull(r.model, p.kvPrec) / r.kvRepl))} tokens${r.kvRepl > 1 ? ` (KV replicated ${r.kvRepl}×)` : ''}. ${r.S > 0 ? `Shared prefix of ${fmtTok(r.S)} tokens stored once per replica (${fmtGB(r.kv.shared)}).` : ''}`),
+      h('p', { class: 'lead' }, ...lead),
+      h('p', { class: 'hint' }, `Per accelerator (${hw.mem} GB): ${fmtGB(wPer)} weights, ${fmtGB(kvPer)} KV cache. The ${unit}'s KV pool holds ${fmtTok(tokens)} tokens${r.kvRepl > 1 ? ` (KV replicated ${r.kvRepl}×)` : ''}. `,
+        r.slots && r.fits ? `${plural(r.slots.n, 'slot')} of ${fmtTok(r.C)} tokens ${r.slots.n === 1 ? 'reserves' : 'reserve'} ${fmtGB(r.slots.reserved)} of it. ` : '',
+        r.S > 0 ? `Shared prefix of ${fmtTok(r.S)} tokens stored once per replica (${fmtGB(r.kv.shared)}).` : ''),
       bar, key,
     ];
     if (tried && tried.length > 1) {
       const rows = tried.slice().sort((x, y) => (y.maxUsers - x.maxUsers) || ((y.at ? y.at.perUser : 0) - (x.at ? x.at.perUser : 0))).slice(0, 5);
       out.push(h('h4', null, 'Layouts considered'), table(
         [{ t: 'Layout', k: 'layout-col' }, { t: 'Concurrent', k: 'concurrent' }, 'Users', { t: 'tok/s per user', k: 'speed-per-user' }, { t: 'Context at load', k: 'ctx-at-load' }, 'Idle'],
-        rows.map((t) => [`TP ${t.tp} × PP ${t.pp} × ${t.R}` + (t === r ? ' ◂' : ''), t.fits ? fmtNum(t.maxConc) : 'no fit', t.fits ? fmtNum(t.maxUsers) : '—', t.at ? fmtTokS(t.at.perUser) : '—', t.fits ? fmtTok(t.maxCtxAtLoad) : '—', fmtNum(t.count - t.total)]),
+        rows.map((t) => [h('span', { class: 'nowrap' }, `TP ${t.tp} × PP ${t.pp} × ${t.R}` + (t === r ? ' ◂' : '')), t.fits ? fmtNum(t.maxConc) : 'no fit', t.fits ? fmtNum(t.maxUsers) : '-', t.at ? fmtTokS(t.at.perUser) : '-', t.fits ? fmtTok(t.maxCtxAtLoad) : '-', fmtNum(t.count - t.total)]),
         { numeric: [1, 2, 3, 4, 5] }));
     }
     return out;
@@ -399,21 +398,31 @@
     const eff = r.tp * r.hw.bw * 1e9 * p.adv.bwEff;
     const linkName = r.tpCross ? p.net.name : (LINKS[p.link] || LINKS.nvlink).name;
     const rows = [
-      [T('decode-step', 'Decode step'), fmtTime(a.step), `${a.bound}-bound at ${fmtNum(r.bPerRep)} concurrent per replica`],
+      [T('decode-step', 'Decode step'), fmtTime(a.step), `${a.bound}-bound at ${fmtNum(r.bAt)} concurrent per replica`],
       [T('mem-traffic', 'Memory traffic'), fmtTime(a.tBw), `${fmtGB(a.wRead)} of weights + ${fmtGB(a.kvRead)} of KV cache per step at ${fmtGB(eff)}/s effective`],
-      [T('compute', 'Compute'), fmtTime(a.tComp), `${r.pk.used} matmuls at ${pct(p.adv.mfu)} of ${fmtNum(r.pk.peak / 1e12)} TFLOPS × ${r.G}`],
+      [T('compute', 'Compute'), fmtTime(a.tComp), `${r.pk.used} matmuls at ${pct(p.adv.mfu)} of ${fmtNum(r.pk.peak / 1e12)} TFLOPS × ${r.computeGpus}${r.seqPP && r.pp > 1 ? ' (layer split: one accelerator at a time)' : ''}`],
       [T('collectives', 'Collectives'), fmtTime(a.tComm), r.tp > 1 ? `${2 * r.model.layers} all-reduces per token over ${linkName}` : 'no tensor parallelism'],
-      [T('prefill-share', 'Prefill share'), pct(a.f) + (a.saturated ? ' (saturated)' : ''), `${a.lambda.toFixed(2)} requests/s per replica, ${fmtTok(r.warmNew)} new tokens each${p.opt.pd ? ' (in the prefill pool)' : ', interleaved with decode'}`],
-      [T('ttft', 'Warm turn TTFT'), fmtTime(r.ttftWarm), p.wl.retention === 'host' ? `includes ${fmtTime(r.restoreS)} to restore ${fmtGB(r.kv.perSession)} from host memory` : `${fmtTok(r.warmNew)} tokens prefilled`],
+      [T('prefill-share', 'Prefill share'), pct(a.f) + (a.saturated ? ' (saturated)' : ''), `${a.lambda.toFixed(2)} requests/s per replica, ${fmtTok(r.warmNew)} new tokens each${r.effective.opt.pd ? ' (in the prefill pool)' : ', interleaved with decode'}`],
+      [T('ttft', 'Warm turn TTFT'), fmtTime(r.ttftWarm), r.effective.retention === 'host' ? `includes ${fmtTime(r.restoreS)} to restore ${fmtGB(r.kv.perSession)} from host memory` : `${fmtTok(r.warmNew)} tokens prefilled`],
       [T('ttft', 'Cold TTFT'), fmtTime(r.ttftCold), `${fmtTok(r.coldNew)} tokens prefilled on ${r.tp} accelerators`],
     ];
     return [table(['What', 'Time', 'Why'], rows, { numeric: [1] })];
   }
+  /* rows: arrays of cells, or { cells, cls, sub } where `sub` is a note shown in a full-width row below; { group } starts a
+   * new row group under a full-width heading. */
   function table(cols, rows, opts) {
     const numeric = new Set((opts && opts.numeric) || []);
-    return h('div', { class: 'tw' }, h('table', { class: 'data' },
-      h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: numeric.has(i) ? 'n' : null }, typeof c === 'string' ? c : T(c.k, c.t))))),
-      h('tbody', null, rows.map((row) => h('tr', { class: row.cls || null }, (row.cells || row).map((c, i) => h('td', { class: numeric.has(i) ? 'n' : 't' }, c)))))));
+    const bodies = [];
+    for (const row of rows) {
+      if (row.group || !bodies.length) bodies.push(h('tbody'));
+      const body = bodies[bodies.length - 1];
+      if (row.group) { body.append(h('tr', { class: 'group' }, h('th', { colspan: cols.length, scope: 'rowgroup' }, row.group))); continue; }
+      body.append(h('tr', { class: [row.cls, row.sub ? 'with-note' : null].filter(Boolean).join(' ') || null }, (row.cells || row).map((c, i) => h('td', { class: numeric.has(i) ? 'n' : 't' }, c))));
+      if (row.sub) body.append(h('tr', { class: [row.cls, 'note-row'].filter(Boolean).join(' ') }, h('td', { class: 't', colspan: cols.length }, h('div', { class: 'note' }, row.sub))));
+    }
+    return h('div', { class: 'tw' }, h('table', { class: ['data', opts && opts.cls].filter(Boolean).join(' ') },
+      h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: numeric.has(i) ? 'n' : null }, typeof c === 'string' || c.nodeType ? c : T(c.k, c.t))))),
+      bodies));
   }
 
   /* ----- charts ----- */
@@ -422,21 +431,25 @@
     if (overrides && overrides.wl) q.wl = Object.assign({}, p.wl, overrides.wl);
     return E.evaluate(Object.assign(q, { tp: r.tp, pp: r.pp, replicas: r.R }));
   }
+  /* Up to three smaller-format variants the engine can run on this hardware: a smaller KV cache, the smallest KV cache,
+   * and smaller weights with the smaller KV cache. */
   function variantLabel(p) {
-    const hw = p.hw;
+    const hw = p.hw, eng = p.engine;
+    const kvOk = (k) => E.kvSupport(hw, k, eng) === 'supported', wOk = (w) => E.formatSupport(hw, w, eng) !== 'unsupported';
+    const kvBytes = (k) => E.bytesKv(k, eng), wBytes = (w) => E.bytesW(w, eng) ?? E.BYTES_W[w];
+    const smallerKv = E.KV_PRECS.filter((k) => kvOk(k) && kvBytes(k) < kvBytes(p.kvPrec)).sort((a, b) => kvBytes(b) - kvBytes(a));
     const list = [];
-    if (p.kvPrec === 'bf16') list.push({ name: 'KV cache FP8', o: { kvPrec: 'fp8' } });
-    if (p.kvPrec !== 'int4') list.push({ name: 'KV cache INT4', o: { kvPrec: 'int4' } });
-    let w = null;
-    if (p.wPrec === 'bf16') w = hw.tflops.fp8 ? 'fp8' : 'int4';
-    else if (['fp8', 'int8'].includes(p.wPrec)) w = hw.tflops.fp4 ? 'fp4' : 'int4';
-    if (w) list.push({ name: `Weights ${E.PREC_LABEL[w].split(' ')[0]} + KV FP8`, o: { wPrec: w, kvPrec: p.kvPrec === 'bf16' ? 'fp8' : p.kvPrec } });
+    if (smallerKv[0]) list.push({ name: `KV cache ${E.kvLabel(smallerKv[0], eng)}`, o: { kvPrec: smallerKv[0] } });
+    if (smallerKv.length > 1) list.push({ name: `KV cache ${E.kvLabel(smallerKv[smallerKv.length - 1], eng)}`, o: { kvPrec: smallerKv[smallerKv.length - 1] } });
+    // prefer formats the hardware computes natively, then the smallest weight-only one
+    const smallerW = E.W_PRECS.filter((w) => wOk(w) && wBytes(w) < wBytes(p.wPrec)).sort((a, b) => (E.formatSupport(hw, b, eng) === 'native') - (E.formatSupport(hw, a, eng) === 'native') || wBytes(b) - wBytes(a));
+    if (smallerW[0]) { const kv = smallerKv[0] || p.kvPrec; list.push({ name: `Weights ${E.precLabel(smallerW[0], eng).split(' ')[0]} + KV ${E.kvLabel(kv, eng)}`, o: { wPrec: smallerW[0], kvPrec: kv } }); }
     return list.slice(0, 3);
   }
   function renderCapacityChart(r, p) {
     const el = $('#chartCapacity');
     if (!r.fits) { el.replaceChildren(h('p', { class: 'hint' }, 'The frontier needs a layout that loads the model.')); return; }
-    const model = r.model, gpu = p.wl.retention === 'gpu';
+    const model = r.model, gpu = r.effective.retention === 'gpu';
     const xMax = Math.min(1 << 24, Math.max(model.maxCtx, p.wl.ctx * 2, 65536));
     const xs = []; for (let x = 1024; x <= xMax * 1.0001; x *= Math.SQRT2) xs.push(Math.round(x));
     if (xs[xs.length - 1] !== xMax) xs.push(xMax);
@@ -455,12 +468,13 @@
     if (!r.fits) { el.replaceChildren(); return; }
     const bMax = Math.max(2, Math.min(r.maxSessions, 2048));
     const xs = [1]; for (let x = 1; x < bMax; x *= Math.SQRT2) { const v = Math.round(x * Math.SQRT2); if (v > xs[xs.length - 1] && v < bMax) xs.push(v); } xs.push(bMax);
-    const series = [{ name: p.opt.spec ? 'With speculative decoding' : 'As configured', color: 'var(--s1)', points: xs.map((b) => [b, r.loadAt(b, p.opt.spec).perUser]) }];
-    series.push(p.opt.spec ? { name: 'Without speculative decoding', color: 'var(--s2)', points: xs.map((b) => [b, r.loadAt(b, false).perUser]) } : { name: 'With speculative decoding', color: 'var(--s2)', points: xs.map((b) => [b, r.loadAt(b, true).perUser]) });
+    const spec = r.effective.opt.spec;
+    const series = [{ name: spec ? 'With speculative decoding' : 'As configured', color: 'var(--s1)', points: xs.map((b) => [b, r.loadAt(b, spec).perUser]) }];
+    if (r.sv.spec) series.push(spec ? { name: 'Without speculative decoding', color: 'var(--s2)', points: xs.map((b) => [b, r.loadAt(b, false).perUser]) } : { name: 'With speculative decoding', color: 'var(--s2)', points: xs.map((b) => [b, r.loadAt(b, true).perUser]) });
     lineChart({
-      el, title: `Speed per user as one replica (${r.G} accelerators) takes more concurrent requests at ${fmtTok(p.wl.ctx)} context`,
+      el, title: `Speed per user as one ${r.slots ? 'server' : 'replica'} (${plural(r.G, 'accelerator')}) takes more concurrent requests at ${fmtTok(p.wl.ctx)} context`,
       x: { label: 'concurrent requests per replica', log: true, fmt: (v) => fmtNum(v), ticks: countTicks }, y: { label: 'tokens per second per user', log: true, fmt: (v) => fmtTokS(v) },
-      series, refY: [{ y: p.wl.target, label: 'target' }], marker: { x: Math.min(r.bPerRep, r.maxSessions), y: r.at.perUser, ok: r.speedOK, label: 'your load' },
+      series, refY: [{ y: p.wl.target, label: 'target' }], marker: { x: r.bAt, y: r.at.perUser, ok: r.speedOK, label: 'your load' },
     });
   }
   function tokenTicks(min, max) { const out = []; const step = Math.log2(max / min) > 8 ? 4 : 2; for (let v = 1024; v <= max * 1.0001; v *= step) if (v >= min) out.push(v); return out; }
@@ -468,8 +482,8 @@
   function logTicks(min, max) { const out = []; const dec = Math.log10(max / min); for (let e = Math.floor(Math.log10(min)); Math.pow(10, e) <= max * 1.0001; e++) for (const m of (dec > 3 ? [1] : dec > 1.5 ? [1, 3] : [1, 2, 5])) { const v = m * Math.pow(10, e); if (v >= min * 0.999 && v <= max * 1.001) out.push(v); } return out; }
 
   function lineChart(o) {
-    const W = 720, H = 330, m = { l: 62, r: 22, t: 20, b: 48 };
-    const pw = W - m.l - m.r, ph = H - m.t - m.b;
+    // drawn at the container's own pixel width (and redrawn when the page width changes), so text keeps its size on any screen
+    const W = Math.max(300, Math.round(o.el.clientWidth || 720)), H = Math.round(Math.min(380, Math.max(300, W * 0.42)));
     const xs = o.series[0].points.map(([x]) => x);
     const valid = o.series.flatMap((sr) => sr.points).filter(([x, y]) => x > 0 && y > 0 && isFinite(y));
     const xMin = Math.min(...xs), xMax = Math.max(...xs);
@@ -477,18 +491,29 @@
     let yMin = Math.min(1, ...valid.map(([, y]) => y), o.marker && o.marker.y > 0 ? o.marker.y : 1);
     yMin = Math.pow(10, Math.floor(Math.log10(Math.max(1e-2, yMin)))); yMax = Math.pow(10, Math.ceil(Math.log10(yMax * 1.05)));
     if (yMax <= yMin) yMax = yMin * 10;
+    const yTicks = logTicks(yMin, yMax);
+    const m = { l: 34 + Math.ceil(7.2 * Math.max(1, ...yTicks.map((t) => String(o.y.fmt(t)).length))), r: 22, t: 20, b: 48 };
+    const pw = W - m.l - m.r, ph = H - m.t - m.b;
     const lx = Math.log(xMin), ux = Math.log(xMax), ly = Math.log(yMin), uy = Math.log(yMax);
     const sx = (x) => m.l + (Math.log(x) - lx) / (ux - lx) * pw;
     const sy = (y) => m.t + ph - (Math.log(y) - ly) / (uy - ly) * ph;
     const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': o.title });
     svg.append(s('rect', { x: 0, y: 0, width: W, height: H, fill: 'var(--chart-surface)' }));
-    for (const t of logTicks(yMin, yMax)) { svg.append(s('line', { x1: m.l, x2: W - m.r, y1: sy(t), y2: sy(t), stroke: 'var(--grid)', 'stroke-width': 1 })); svg.append(s('text', { x: m.l - 8, y: sy(t), 'text-anchor': 'end', 'dominant-baseline': 'middle' }, o.y.fmt(t))); }
+    for (const t of yTicks) { svg.append(s('line', { x1: m.l, x2: W - m.r, y1: sy(t), y2: sy(t), stroke: 'var(--grid)', 'stroke-width': 1 })); svg.append(s('text', { x: m.l - 8, y: sy(t), 'text-anchor': 'end', 'dominant-baseline': 'middle' }, o.y.fmt(t))); }
     svg.append(s('line', { x1: m.l, x2: W - m.r, y1: m.t + ph, y2: m.t + ph, stroke: 'var(--axis)', 'stroke-width': 1 }));
-    for (const t of o.x.ticks(xMin, xMax)) { svg.append(s('line', { x1: sx(t), x2: sx(t), y1: m.t + ph, y2: m.t + ph + 4, stroke: 'var(--axis)' })); svg.append(s('text', { x: sx(t), y: m.t + ph + 16, 'text-anchor': 'middle' }, o.x.fmt(t))); }
+    let labelEnd = -Infinity;                     // on narrow charts some tick labels give way so none overlap
+    for (const t of o.x.ticks(xMin, xMax)) {
+      svg.append(s('line', { x1: sx(t), x2: sx(t), y1: m.t + ph, y2: m.t + ph + 4, stroke: 'var(--axis)' }));
+      const label = String(o.x.fmt(t)), half = label.length * 3.6;
+      if (sx(t) - half < labelEnd + 8) continue;
+      svg.append(s('text', { x: sx(t), y: m.t + ph + 16, 'text-anchor': 'middle' }, label));
+      labelEnd = sx(t) + half;
+    }
     svg.append(s('text', { x: m.l + pw / 2, y: H - 8, 'text-anchor': 'middle', class: 'axis-title' }, o.x.label));
     svg.append(s('text', { x: 14, y: m.t + ph / 2, 'text-anchor': 'middle', transform: `rotate(-90 14 ${m.t + ph / 2})`, class: 'axis-title' }, o.y.label));
-    for (const rx of o.refX || []) { if (rx.x < xMin || rx.x > xMax) continue; svg.append(s('line', { x1: sx(rx.x), x2: sx(rx.x), y1: m.t, y2: m.t + ph, stroke: 'var(--axis)', 'stroke-width': 1 })); svg.append(s('text', { x: sx(rx.x) - 4, y: m.t + 10, 'text-anchor': 'end', class: 'ref' }, rx.label)); }
-    for (const ry of o.refY || []) { if (ry.y < yMin || ry.y > yMax) continue; svg.append(s('line', { x1: m.l, x2: W - m.r, y1: sy(ry.y), y2: sy(ry.y), stroke: 'var(--axis)', 'stroke-width': 1 })); svg.append(s('text', { x: W - m.r - 4, y: sy(ry.y) - 5, 'text-anchor': 'end', class: 'ref' }, `${ry.label} ${o.y.fmt(ry.y)}`)); }
+    const labels = [], markerRight = !!o.marker && o.marker.x > Math.sqrt(xMin * xMax);
+    for (const rx of o.refX || []) { if (rx.x < xMin || rx.x > xMax) continue; svg.append(s('line', { x1: sx(rx.x), x2: sx(rx.x), y1: m.t, y2: m.t + ph, stroke: 'var(--axis)', 'stroke-width': 1 })); labels.push(s('text', { x: sx(rx.x) - 4, y: m.t + 10, 'text-anchor': 'end', class: 'ref' }, rx.label)); }
+    for (const ry of o.refY || []) { if (ry.y < yMin || ry.y > yMax) continue; svg.append(s('line', { x1: m.l, x2: W - m.r, y1: sy(ry.y), y2: sy(ry.y), stroke: 'var(--axis)', 'stroke-width': 1 })); labels.push(s('text', { x: markerRight ? m.l + 4 : W - m.r - 4, y: sy(ry.y) - 5, 'text-anchor': markerRight ? 'start' : 'end', class: 'ref' }, `${ry.label} ${o.y.fmt(ry.y)}`)); }
     o.series.forEach((sr) => {
       let d = '', pen = false, last = null;
       for (const [x, y] of sr.points) { if (!(y > 0) || !isFinite(y)) { pen = false; continue; } d += `${pen ? 'L' : 'M'}${sx(x).toFixed(1)},${sy(Math.min(Math.max(y, yMin), yMax)).toFixed(1)} `; pen = true; last = [x, y]; }
@@ -500,8 +525,12 @@
       const col = o.marker.ok ? 'var(--good)' : 'var(--crit)';
       svg.append(s('circle', { cx: sx(o.marker.x), cy: sy(my), r: 8, fill: 'var(--chart-surface)' }));
       svg.append(s('circle', { cx: sx(o.marker.x), cy: sy(my), r: 5.5, fill: col }));
-      svg.append(s('text', { x: sx(o.marker.x) + 10, y: sy(my) + 4, class: 'ref' }, o.marker.label));
+      // the label sits right of the dot, left of it near the right edge, and below it when a reference line (labelled above) is close
+      const mx = sx(o.marker.x), left = mx > m.l + pw * 0.75;
+      const ref = (o.refY || []).find((ry) => ry.y >= yMin && ry.y <= yMax && Math.abs(sy(ry.y) - sy(my)) < 16);
+      labels.push(s('text', { x: left ? mx - 12 : mx + 10, y: ref ? Math.max(sy(my), sy(ref.y)) + 18 : sy(my) + 4, 'text-anchor': left ? 'end' : 'start', class: 'ref' }, o.marker.label));
     }
+    svg.append(...labels);
     const cross = s('line', { x1: 0, x2: 0, y1: m.t, y2: m.t + ph, stroke: 'var(--axis)', 'stroke-width': 1, visibility: 'hidden' });
     svg.append(cross);
     const hit = s('rect', { x: m.l, y: m.t, width: pw, height: ph, fill: 'transparent', tabindex: 0, style: 'outline:none;cursor:crosshair' });
@@ -538,41 +567,55 @@
   function renderLedger(base, p) {
     const el = $('#ledger');
     if (!base.fits) { el.replaceChildren(h('p', { class: 'hint' }, 'Once the model loads, this table compares the options that buy more concurrency or context.')); return; }
-    const hw = p.hw, st = state;
-    const rows = [{ name: 'As configured', term: null, r: base, o: null, note: `${E.PREC_LABEL[st.wPrec]} weights, ${E.KV_LABEL[st.kvPrec]} KV${st.spec ? ', speculative decoding' : ''}${st.pd ? ', prefill/decode split' : ''}` }];
+    const hw = p.hw, st = state, eng = ENGINES[st.engine] ? st.engine : 'none', en = engineOf(eng), sv = E.servingOf(eng);
+    const kvOk = (k) => E.kvSupport(hw, k, eng) === 'supported', wSup = (w, e = eng) => E.formatSupport(hw, w, e);
+    const kvBytes = (k, e = eng) => E.bytesKv(k, e), wBytes = (w, e = eng) => E.bytesW(w, e) ?? E.BYTES_W[w];
+    const nearest = (list, cur, ok, bytes) => list.filter(ok).sort((a, b) => Math.abs(bytes(a) - bytes(cur)) - Math.abs(bytes(b) - bytes(cur)))[0] || cur;
+    const rows = [{ name: 'As configured', term: null, r: base, o: null, note: `${E.precLabel(st.wPrec, eng)} weights, ${E.kvLabel(st.kvPrec, eng)} KV${base.effective.opt.spec ? ', speculative decoding' : ''}${base.effective.opt.pd ? ', prefill/decode split' : ''}${base.slots ? `, ${plural(base.slots.n, 'parallel slot')}` : ''}` }];
     const add = (name, o, note, term) => rows.push({ name, term, r: run(o).best, o, note });
-    if (st.kvPrec === 'bf16') add('KV cache in FP8', { kvPrec: 'fp8' }, 'Half the KV bytes per token; usually no measurable quality loss' + (E.kvSupport(hw, 'fp8', st.engine || 'none') === 'supported' ? '' : `; not offered by ${ENGINES[st.engine || 'none'].name} here`), 'opt-kv-fp8');
-    if (st.kvPrec !== 'int4') add('KV cache in INT4', { kvPrec: 'int4' }, 'A quarter of the KV bytes; quality risk grows with context' + (E.kvSupport(hw, 'int4', st.engine || 'none') === 'supported' ? '' : `; not offered by ${ENGINES[st.engine || 'none'].name} (LMDeploy has it)`), 'opt-kv-int4');
+    const eight = ['fp8', 'int8'].find(kvOk) || 'fp8';
+    if (kvBytes(st.kvPrec) > kvBytes(eight)) add(`KV cache in ${E.kvLabel(eight, eng)}`, { kvPrec: eight }, 'Half the KV bytes per token; usually no measurable quality loss' + (kvOk(eight) ? '' : `; not offered by ${en.name} here`), 'opt-kv-fp8');
+    if (st.kvPrec !== 'int4') add(`KV cache in ${E.kvLabel('int4', eng)}`, { kvPrec: 'int4' }, 'A quarter of the KV bytes; quality risk grows with context' + (kvOk('int4') ? '' : `; not offered by ${en.name} here (Ollama q4_0 and LMDeploy have it)`), 'opt-kv-int4');
     const model = E.norm(p.model);
-    const ckpt = (prec) => { const c = checkpointFor(model, prec); return c ? `; checkpoint: ${c.org} (${c.kind})` : '; no known checkpoint'; };
-    if (st.wPrec === 'bf16') add('Weights in FP8', { wPrec: 'fp8' }, (E.formatSupport(hw, 'fp8', st.engine || 'none') === 'native' ? 'Native FP8 here: halves weight bytes and speeds up decode' : 'Weight-only on this accelerator: saves memory, compute stays BF16') + ckpt('fp8'), 'opt-w-fp8');
-    if (!['int4', 'fp4'].includes(st.wPrec)) { const f4 = E.formatSupport(hw, 'fp4', st.engine || 'none') === 'native'; add(f4 ? 'Weights in FP4 (NVFP4)' : 'Weights in INT4 (AWQ / GPTQ)', { wPrec: f4 ? 'fp4' : 'int4' }, (f4 ? 'Native FP4: a quarter of the weight bytes and faster prefill' : 'Weight-only 4-bit: a quarter of the weight bytes, compute stays BF16') + ckpt(f4 ? 'fp4' : 'int4'), 'opt-w-4bit'); }
-    if (!st.prefixCache && st.prefix > 0) add('Cache the shared prefix', { prefixCache: true }, `The ${fmtTok(st.prefix)}-token shared prefix is stored once per replica`, 'prefix-caching');
-    if (!st.spec) add('Speculative decoding', { spec: true }, `Draft ${st.specK} tokens per step at ${st.specAlpha}% acceptance; helps when memory-bound`, 'spec');
-    if (st.retention === 'gpu') add('Park idle sessions in host memory', { retention: 'host' }, 'GPU memory holds only in-flight requests; idle KV restores over PCIe', 'opt-host');
-    if (st.retention === 'none') add('Keep idle sessions in host memory', { retention: 'host' }, 'Skips re-prefilling the whole conversation on every turn', 'opt-host');
-    if (!st.pd) add('Disaggregate prefill from decode', { pd: true }, 'A separate prefill pool keeps token speed steady; needs KV transfer over the network', 'pd');
+    const ckpt = (prec) => { if (eng === 'ollama') return '; GGUF from the Ollama library'; const c = checkpointFor(model, prec); return c ? `; checkpoint: ${c.org} (${c.kind})` : '; no known checkpoint'; };
+    const w8 = ['fp8', 'int8'].find((w) => wSup(w) !== 'unsupported');
+    if (st.wPrec === 'bf16' && w8) add(`Weights in ${E.precLabel(w8, eng)}`, { wPrec: w8 }, (wSup(w8) === 'native' ? `Native ${w8.toUpperCase()} here: halves weight bytes and speeds up decode` : 'Weight-only on this accelerator: saves memory, compute stays BF16') + ckpt(w8), 'opt-w-fp8');
+    const w4 = wSup('fp4') === 'native' ? 'fp4' : wSup('int4') !== 'unsupported' ? 'int4' : null;
+    if (w4 && !['int4', 'fp4'].includes(st.wPrec)) add(`Weights in ${E.precLabel(w4, eng)}`, { wPrec: w4 }, (w4 === 'fp4' ? 'Native FP4: a quarter of the weight bytes and faster prefill' : 'Weight-only 4-bit: about a quarter of the weight bytes, compute stays BF16') + ckpt(w4), 'opt-w-4bit');
+    if (!st.prefixCache && st.prefix > 0 && sv.prefixCache === true) add('Cache the shared prefix', { prefixCache: true }, `The ${fmtTok(st.prefix)}-token shared prefix is stored once per replica`, 'prefix-caching');
+    if (!st.spec && sv.spec) add('Speculative decoding', { spec: true }, `Draft ${st.specK} tokens per step at ${st.specAlpha}% acceptance; helps when memory-bound${eng === 'ollama' ? '; needs a draft model in the Modelfile' : ''}`, 'spec');
+    const hostNote = sv.hostCacheGB != null ? `; ${en.name} caches up to ${fmtGB(sv.hostCacheGB * 1e9)} per server` : '';
+    if (base.effective.retention === 'gpu' && sv.retention.includes('host')) add('Park idle sessions in host memory', { retention: 'host' }, 'GPU memory holds only in-flight requests; idle KV restores over PCIe' + hostNote, 'opt-host');
+    if (base.effective.retention === 'none' && sv.retention.includes('host')) add('Keep idle sessions in host memory', { retention: 'host' }, 'Skips re-prefilling the whole conversation on every turn' + hostNote, 'opt-host');
+    if (!st.pd && sv.pd) add('Disaggregate prefill from decode', { pd: true }, 'A separate prefill pool keeps token speed steady; needs KV transfer over the network', 'pd');
+    if (base.slots) {
+      add(`${base.slots.n * 2} parallel slots`, { slots: base.slots.n * 2 }, `Doubles ${sv.slots.env}; every slot reserves its own ${fmtTok(st.ctx)}-token context`, 'slots');
+      const vw = nearest(E.W_PRECS, st.wPrec, (w) => wSup(w, 'vllm') !== 'unsupported', (w) => wBytes(w, 'vllm'));
+      const vk = nearest(E.KV_PRECS, st.kvPrec, (k) => E.kvSupport(hw, k, 'vllm') === 'supported', (k) => kvBytes(k, 'vllm'));
+      add('Same hardware with vLLM', { engine: 'vllm', wPrec: vw, kvPrec: vk }, `Continuous batching over a paged KV cache: every request shares the memory (${E.precLabel(vw, 'vllm')} weights, ${E.kvLabel(vk, 'vllm')} KV)`, 'continuous-batching');
+    }
     const combo = {};
-    if (st.kvPrec === 'bf16') combo.kvPrec = 'fp8';
-    if (st.wPrec === 'bf16') combo.wPrec = E.formatSupport(hw, 'fp8', st.engine || 'none') === 'native' ? 'fp8' : 'int4';
-    if (!st.spec) combo.spec = true;
-    if (!st.prefixCache && st.prefix > 0) combo.prefixCache = true;
+    if (kvBytes(st.kvPrec) > kvBytes(eight) && kvOk(eight)) combo.kvPrec = eight;
+    if (st.wPrec === 'bf16' && w8) combo.wPrec = wSup(w8) === 'native' ? w8 : (wSup('int4') !== 'unsupported' ? 'int4' : w8);
+    if (!st.spec && sv.spec) combo.spec = true;
+    if (!st.prefixCache && st.prefix > 0 && sv.prefixCache === true) combo.prefixCache = true;
     if (Object.keys(combo).length > 1) add('All of the above (memory + speed)', combo, 'The combination most production stacks run');
     const b = base;
     const cells = rows.map((row) => {
       const r = row.r, a = r.at;
-      const verdict = !r.fits ? ['out of memory', 'bad'] : !r.memOK ? ['not enough KV', 'bad'] : !r.speedOK ? [!r.ttftOK ? 'slow first token' : a && a.saturated ? 'prefill-bound' : 'too slow', 'warn'] : ['meets target', 'good'];
+      const verdict = !r.loadable ? ['not supported', 'bad'] : !r.fits ? ['out of memory', 'bad'] : r.slotLimited ? ['slots full', 'bad'] : !r.memOK ? ['not enough KV', 'bad'] : !r.speedOK ? [!r.ttftOK ? 'slow first token' : a && a.saturated ? 'prefill-bound' : 'too slow', 'warn'] : ['meets target', 'good'];
       const delta = (v, bv) => bv > 0 && v !== bv ? h('small', { class: v > bv ? 'up' : 'down' }, ` ${v > bv ? '+' : ''}${Math.round((v / bv - 1) * 100)}%`) : null;
       return {
         cls: row.r === base ? 'base' : null,
+        sub: row.note,
         cells: [
-          h('div', null, h('b', null, row.term ? T(row.term, row.name) : row.name), h('div', { class: 'note' }, row.note)),
+          h('b', null, row.term ? T(row.term, row.name) : row.name),
           r.fits ? h('span', null, fmtNum(r.maxConc), delta(r.maxConc, b.maxConc)) : '0',
           r.fits ? fmtNum(r.maxUsers) : '0',
-          r.fits ? h('span', null, fmtTok(r.maxCtxAtLoad), delta(r.maxCtxAtLoad, b.maxCtxAtLoad)) : '—',
-          a ? h('span', null, fmtTokS(a.perUser), delta(a.perUser, b.at ? b.at.perUser : 0)) : '—',
-          a ? fmtTime(r.ttft) : '—',
-          r.costPerMTok != null ? fmtMoney(r.costPerMTok) : '—',
+          r.fits ? h('span', null, fmtTok(r.maxCtxAtLoad), delta(r.maxCtxAtLoad, b.maxCtxAtLoad)) : '-',
+          a ? h('span', null, fmtTokS(a.perUser), delta(a.perUser, b.at ? b.at.perUser : 0)) : '-',
+          a ? fmtTime(r.ttft) : '-',
+          r.costPerMTok != null ? fmtMoney(r.costPerMTok) : '-',
           h('span', { class: 'chip ' + verdict[1] }, verdict[0]),
           row.o ? h('button', { class: 'ghost', type: 'button', onclick: () => { Object.assign(state, row.o); syncInputs(); scheduleRender(); } }, 'Apply') : '',
         ],
@@ -590,12 +633,13 @@
   function renderReverse() {
     const p = params();
     const model = E.norm(p.model);
-    $('#modelHint').textContent = `${fmtNum(model.params, 1)}B params${model.moe ? `, ${fmtNum(model.active, 1)}B active` : ''} · KV ${fmtGB(E.kvPerTokenFull(model, p.kvPrec))}/token in ${E.KV_LABEL[p.kvPrec]} · max context ${fmtTok(model.maxCtx)}${model.nativePrec ? ' · ships in ' + model.nativePrec.toUpperCase() : ''}`;
+    $('#modelHint').textContent = `${fmtNum(model.params, 1)}B params${model.moe ? `, ${fmtNum(model.active, 1)}B active` : ''} · KV ${fmtGB(E.kvPerTokenFull(model, p.kvPrec, p.engine))}/token in ${E.kvLabel(p.kvPrec, p.engine)} · max context ${fmtTok(model.maxCtx)}${model.nativePrec ? ' · ships in ' + model.nativePrec.toUpperCase() : ''}`;
     labelPrecOptions(null);
     $('#precHint').replaceChildren(checkpointNode(model, p.wPrec));
     const list = allHardware().filter((hw) => state.candidates.includes(hw.id));
     const B = Math.max(1, Math.round(p.wl.users * p.wl.activity));
-    $('#revIntro').textContent = `Smallest layout per accelerator type that serves ${fmtNum(p.wl.users)} users (${fmtNum(B)} concurrent at ${pct(p.wl.activity)} active) of ${model.name} at ${fmtTok(p.wl.ctx)} context with at least ${p.wl.target} tok/s each and a first token within ${fmtTime(p.wl.ttftMax)}. Session KV: ${fmtGB(E.kvAtCtx(model, p.kvPrec, p.wl.ctx))} in ${E.KV_LABEL[p.kvPrec]}; all sessions: ${fmtGB(E.kvAtCtx(model, p.kvPrec, p.wl.ctx) * (p.wl.retention === 'gpu' ? p.wl.users : B))}.`;
+    const sessionKv = E.kvAtCtx(model, p.kvPrec, p.wl.ctx, p.engine);
+    $('#revIntro').textContent = `Smallest layout per accelerator type that serves ${fmtNum(p.wl.users)} users (${fmtNum(B)} concurrent at ${pct(p.wl.activity)} active) of ${model.name} at ${fmtTok(p.wl.ctx)} context with at least ${p.wl.target} tok/s each and a first token within ${fmtTime(p.wl.ttftMax)}${p.engine !== 'none' ? `, served by ${engineOf(p.engine).name}` : ''}. Session KV: ${fmtGB(sessionKv)} in ${E.kvLabel(p.kvPrec, p.engine)}; all sessions: ${fmtGB(sessionKv * (E.effective(p).retention === 'gpu' ? p.wl.users : B))}.`;
     if (!list.length) { $('#revSummary').replaceChildren(); $('#revTable').replaceChildren(h('p', { class: 'hint' }, 'Pick at least one candidate accelerator in the left rail.')); return; }
     const results = E.reverse(p, list);
     const feasible = results.filter((r) => !r.infeasible);
@@ -606,14 +650,14 @@
     if (fewest) sum.push(tile('Fewest accelerators', `${fewest.gpusUsed}× ${fewest.hw.name}`, `${plural(fewest.nodes, 'node')} · ${fmtTokS(fewest.at.perUser)} tok/s per user`, 'good', true));
     if (cheapest) sum.push(tile('Lowest hourly cost', `${fmtMoney(cheapest.price, 0)}/h`, `${cheapest.gpusUsed}× ${cheapest.hw.name}`, null, false, 'cost-hour'));
     if (perTok) sum.push(tile('Lowest cost per token', `${fmtMoney(perTok.costPerMTok)} / 1M`, `${perTok.gpusUsed}× ${perTok.hw.name} at ${fmtNum(perTok.aggTotal)} tok/s`, null, false, 'cost-token'));
-    if (!feasible.length) sum.push(tile('No candidate works', '—', 'see the reasons below', 'bad', true));
+    if (!feasible.length) sum.push(tile('No candidate works', '-', 'see the reasons below', 'bad', true));
     $('#revSummary').replaceChildren(...sum);
     const rows = results.map((r) => r.infeasible
-      ? { cls: 'muted', cells: [h('b', null, r.hw.name), '—', '—', h('span', { class: 'note' }, r.reason), '', '', '', '', '', '', ''] }
-      : { cells: [
-        h('div', null, h('b', null, r.hw.name), r.warnings.some((w) => w.level === 'warn') ? h('div', { class: 'note' }, r.warnings.filter((w) => w.level === 'warn').map((w) => w.text).join(' ')) : null),
-        h('b', null, fmtNum(r.gpusUsed)), fmtNum(r.nodes), `TP ${r.tp} × PP ${r.pp} × ${r.R}${r.pdTotal ? ` + ${r.pdTotal} prefill` : ''}`,
-        fmtTokS(r.at.perUser), fmtTime(r.ttft), fmtGB(r.kvAvail * r.R), r.price != null ? fmtMoney(r.price, 0) : '—', r.costPerMTok != null ? fmtMoney(r.costPerMTok) : '—', r.kW != null ? fmtNum(r.kW, 1) : '—',
+      ? { cls: 'muted', cells: [h('b', null, r.hw.name), '-', '-', '-', '', '', '', '', '', '', ''], sub: r.reason }
+      : { sub: r.warnings.filter((w) => w.level === 'warn').map((w) => w.text).join(' ') || null, cells: [
+        h('b', null, r.hw.name),
+        h('b', null, fmtNum(r.gpusUsed)), fmtNum(r.nodes), [h('span', { class: 'nowrap' }, `TP ${r.tp} × PP ${r.pp} × ${r.R}`), r.pdTotal ? ` + ${r.pdTotal} prefill` : ''],
+        fmtTokS(r.at.perUser), fmtTime(r.ttft), fmtGB(r.kvAvail * r.R), r.price != null ? fmtMoney(r.price, 0) : '-', r.costPerMTok != null ? fmtMoney(r.costPerMTok) : '-', r.kW != null ? fmtNum(r.kW, 1) : '-',
         h('button', { class: 'ghost', type: 'button', onclick: () => openInPlanner(r) }, 'Open'),
       ] });
     $('#revTable').replaceChildren(table([{ t: 'Accelerator', k: 'accelerator' }, 'Count', { t: 'Nodes', k: 'nodes' }, { t: 'Layout', k: 'layout-col' }, { t: 'tok/s per user', k: 'speed-per-user' }, { t: 'TTFT', k: 'ttft' }, { t: 'KV pool', k: 'kv-pool' }, { t: '$ / hour', k: 'cost-hour' }, { t: '$ / 1M tok', k: 'cost-token' }, { t: 'kW', k: 'kw' }, ''], rows, { numeric: [1, 2, 4, 5, 6, 7, 8, 9] }));
@@ -628,7 +672,8 @@
     const p = params();
     const hws = allHardware(), models = allModels();
     const ctx = Math.max(1024, state.compatCtx | 0);
-    $('#compatIntro').textContent = `Each cell is the fewest accelerators of that type on which the model loads with ${E.PREC_LABEL[p.wPrec]} weights and still has room for one ${fmtTok(ctx)}-token session (${E.KV_LABEL[p.kvPrec]} KV cache), using the best tensor × pipeline layout. Change the precisions in the left rail.`;
+    const sv = E.servingOf(p.engine), room = sv.batching === 'slots' ? `${plural(p.slots > 0 ? p.slots : sv.slots.default, 'parallel slot')} of ${fmtTok(ctx)} tokens` : `one ${fmtTok(ctx)}-token session`;
+    $('#compatIntro').textContent = `Each cell is the fewest accelerators of that type on which the model loads with ${E.precLabel(p.wPrec, p.engine)} weights and still has room for ${room} (${E.kvLabel(p.kvPrec, p.engine)} KV cache), using the best ${sv.pp === 'sequential' ? 'layer split' : 'tensor × pipeline layout'}${p.engine !== 'none' ? ` ${engineOf(p.engine).name} supports` : ''}. Change the engine and precisions in the left rail.`;
     labelPrecOptions(null);
     $('#precHint').replaceChildren(checkpointNode(E.norm(p.model), p.wPrec));
     $('#compatLegend').replaceChildren(
@@ -636,18 +681,20 @@
       h('li', null, h('b', { class: 'sample one' }, '1'), h('span', null, 'one accelerator is enough')),
       h('li', null, h('b', { class: 'sample node' }, '4'), h('span', null, 'several accelerators, but within one node (tensor parallel over the node fabric)')),
       h('li', null, h('b', { class: 'sample multi' }, '16'), h('span', null, 'more accelerators than one node holds (pipeline stages across the inter-node network)')),
-      h('li', null, h('b', { class: 'sample none' }, '—'), h('span', null, 'no layout up to TP 64 × PP 16 loads it on this hardware')),
-      h('li', null, h('b', { class: 'sample none' }, '✕'), h('span', null, `${E.PREC_LABEL[p.wPrec]} weights are not loadable on that chip generation (no kernel)`)),
-      h('li', null, h('b', { class: 'sample' }, 'KV/token'), h('span', null, `bytes of KV cache one token costs in ${E.KV_LABEL[p.kvPrec]}; multiply by the context to size a session`)),
+      h('li', null, h('b', { class: 'sample none' }, '-'), h('span', null, sv.multiNode ? 'no layout up to TP 64 × PP 16 loads it on this hardware' : `does not fit in one node, and ${engineOf(p.engine).name} serves a model within one node`)),
+      h('li', null, h('b', { class: 'sample none' }, '✕'), h('span', null, `${E.precLabel(p.wPrec, p.engine)} weights are not loadable on that chip generation${p.engine !== 'none' ? `, or ${engineOf(p.engine).name} does not run there` : ' (no kernel)'}`)),
+      h('li', null, h('b', { class: 'sample' }, 'KV/token'), h('span', null, `bytes of KV cache one token costs in ${E.kvLabel(p.kvPrec, p.engine)}; multiply by the context to size a session`)),
     );
     const head = h('tr', null, h('th', { class: 'sticky' }, 'Model'), h('th', { class: 'n' }, T('kv-per-token', 'KV/token')), hws.map((hw) => h('th', { class: 'n rot' }, h('span', null, hw.name))));
     const body = models.map((m0) => {
       const m = E.norm(m0);
-      return h('tr', null, h('td', { class: 't sticky' }, m.name), h('td', { class: 'n' }, fmtGB(E.kvPerTokenFull(m, p.kvPrec))), hws.map((hw) => {
-        const unsupported = E.formatSupport(hw, p.wPrec, p.engine) === 'unsupported' || E.kvSupport(hw, p.kvPrec, p.engine) !== 'supported';
-        const mg = unsupported ? null : E.minGpus(hw, m, p.wPrec, p.kvPrec, ctx, p.adv);
+      return h('tr', null, h('td', { class: 't sticky' }, m.name), h('td', { class: 'n' }, fmtGB(E.kvPerTokenFull(m, p.kvPrec, p.engine))), hws.map((hw) => {
+        const notHere = E.engineCovers(hw, p.engine) === 'no';
+        const unsupported = notHere || E.formatSupport(hw, p.wPrec, p.engine) === 'unsupported' || E.kvSupport(hw, p.kvPrec, p.engine) !== 'supported';
+        const mg = unsupported ? null : E.minGpus(hw, m, p.wPrec, p.kvPrec, ctx, p.adv, { engine: p.engine, slots: p.slots });
         const cls = !mg ? 'none' : mg.G === 1 ? 'one' : mg.G <= hw.nodeGpus ? 'node' : 'multi';
-        return h('td', { class: 'n cell ' + cls, title: unsupported ? `${hw.name}: ${E.PREC_LABEL[p.wPrec]} weights are not loadable on ${(ARCHS[hw.arch] || {}).name || 'this generation'}` : mg ? `${hw.name}: ${mg.G} (TP ${mg.tp} × PP ${mg.pp})` : `${hw.name}: no layout up to 64 × 16 loads it` }, unsupported ? '✕' : mg ? String(mg.G) : '—');
+        const why = notHere ? `${engineOf(p.engine).name} does not run on ${(ARCHS[hw.arch] || {}).name || 'this generation'}` : `${E.precLabel(p.wPrec, p.engine)} weights are not loadable on ${(ARCHS[hw.arch] || {}).name || 'this generation'}`;
+        return h('td', { class: 'n cell ' + cls, title: unsupported ? `${hw.name}: ${why}` : mg ? `${hw.name}: ${mg.G} (${sv.pp === 'sequential' ? `layer split over ${mg.pp}` : `TP ${mg.tp} × PP ${mg.pp}`})` : `${hw.name}: no layout ${sv.multiNode ? 'up to 64 × 16' : 'within one node'} loads it` }, unsupported ? '✕' : mg ? String(mg.G) : '-');
       }));
     });
     $('#compatTable').replaceChildren(h('div', { class: 'tw tall' }, h('table', { class: 'data compat' }, h('thead', null, head), h('tbody', null, body))));
@@ -656,25 +703,43 @@
   /* ----- catalog ----- */
   function renderCatalog() {
     const hwRows = allHardware().map((hw) => [
-      h('b', null, hw.name + (hw.approx ? ' ~' : '')), hw.vendor, fmtNum(hw.mem), fmtNum(hw.bw), hw.tflops.fp16 ? fmtNum(hw.tflops.fp16) : '—', hw.tflops.fp8 ? fmtNum(hw.tflops.fp8) : '—', hw.tflops.fp4 ? fmtNum(hw.tflops.fp4) : '—',
-      `${(LINKS[hw.link] || LINKS.none).name}${hw.linkBw ? ' ' + fmtNum(hw.linkBw) + ' GB/s' : ''}`, fmtNum(hw.nodeGpus), hw.tdp != null ? fmtNum(hw.tdp) : '—', hw.price != null ? fmtMoney(hw.price) : '—',
-      ARCHS[hw.arch] ? ARCHS[hw.arch].name : '—', ARCHS[hw.arch] ? ARCHS[hw.arch].native.map((x) => x.toUpperCase()).join(' ') : '—', ARCHS[hw.arch] ? ARCHS[hw.arch].weightOnly.map((x) => x.toUpperCase()).join(' ') : '—',
+      h('b', null, hw.name + (hw.approx ? ' ~' : '')), hw.vendor, fmtNum(hw.mem), fmtNum(hw.bw), hw.tflops.fp16 ? fmtNum(hw.tflops.fp16) : '-', hw.tflops.fp8 ? fmtNum(hw.tflops.fp8) : '-', hw.tflops.fp4 ? fmtNum(hw.tflops.fp4) : '-',
+      `${(LINKS[hw.link] || LINKS.none).name}${hw.linkBw ? ' ' + fmtNum(hw.linkBw) + ' GB/s' : ''}`, fmtNum(hw.nodeGpus), hw.tdp != null ? fmtNum(hw.tdp) : '-', hw.price != null ? fmtMoney(hw.price) : '-',
+      ARCHS[hw.arch] ? ARCHS[hw.arch].name : '-', ARCHS[hw.arch] ? ARCHS[hw.arch].native.map((x) => x.toUpperCase()).join(' ') : '-', ARCHS[hw.arch] ? ARCHS[hw.arch].weightOnly.map((x) => x.toUpperCase()).join(' ') : '-',
     ]);
     $('#catHardware').replaceChildren(table([{ t: 'Accelerator', k: 'accelerator' }, 'Vendor', { t: 'Memory GB', k: 'mem-gb' }, { t: 'GB/s', k: 'bw' }, { t: 'BF16 TFLOPS', k: 'tflops-bf16' }, { t: 'FP8', k: 'tflops-fp8' }, { t: 'FP4', k: 'tflops-fp4' }, { t: 'Fabric', k: 'fabric' }, { t: 'Per node', k: 'per-node' }, { t: 'W', k: 'tdp' }, { t: '$/h', k: 'price' }, { t: 'Generation', k: 'generation' }, { t: 'Native formats', k: 'native-fmt' }, { t: 'Weight-only', k: 'weight-only' }], hwRows, { numeric: [2, 3, 4, 5, 6, 8, 9, 10] }));
-    const fams = ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'gaudi', 'tpu', 'other'];
+    const fams = ENGINE_FAMILIES;
+    const yes = (t) => h('span', { class: 'chip good' }, t), no = (t) => h('span', { class: 'chip bad' }, t);
     const engRows = [];
     for (const [k, e] of Object.entries(ENGINES)) {
       if (!e.weights) continue;
-      for (const f of ['fp8', 'int8', 'int4', 'fp4']) engRows.push([h('b', null, e.name), E.PREC_LABEL[f]].concat(fams.map((fam) => { const v = (e.weights[f] || {})[fam]; return v ? h('span', { class: 'chip ' + (v === 'native' ? 'good' : 'info') }, v) : h('span', { class: 'chip bad' }, 'no'); })));
-      engRows.push([h('b', null, e.name), 'KV cache'].concat(fams.map((fam) => { const ks = Object.entries(e.kvCache || {}).filter(([, l]) => l.includes(fam)).map(([d]) => d.toUpperCase()); return ks.length ? h('span', { class: 'chip good' }, ks.join(' ')) : h('span', { class: 'chip bad' }, 'BF16 only'); })));
+      const runs = (fam) => !e.families || e.families.includes(fam.id);
+      engRows.push({ group: [h('b', null, e.name), ` · ${e.version}, checked ${e.checked}`] });
+      engRows.push({ cls: 'base', cells: ['Runs on'].concat(fams.map((fam) => (runs(fam) ? yes('yes') : no('no')))) });
+      for (const f of ['fp8', 'int8', 'int4', 'fp4']) engRows.push([E.precLabel(f, k)].concat(fams.map((fam) => { const v = (e.weights[f] || {})[fam.id]; return !runs(fam) ? '' : v ? h('span', { class: 'chip ' + (v === 'native' ? 'good' : 'info') }, v) : no('no'); })));
+      engRows.push(['KV cache'].concat(fams.map((fam) => { if (!runs(fam)) return ''; const ks = Object.entries(e.kvCache || {}).filter(([, l]) => l.includes(fam.id)).map(([d]) => E.kvLabel(d, k)); return ks.length ? yes(ks.join(' ')) : no(`${E.kvLabel('bf16', k)} only`); })));
     }
-    $('#catEngines').replaceChildren(table(['Engine', 'Format'].concat(fams.map((f) => f.toUpperCase())), engRows), h('ul', { class: 'warnings', style: 'margin-top:10px' }, Object.values(ENGINES).filter((e) => e.docs).map((e) => h('li', null, h('b', null, `${e.name} (${e.version}, checked ${e.checked}${e.unverified ? ', not re-verified' : ''}): `), e.notes.join(' '), ' ', h('a', { href: e.docs.weights, target: '_blank', rel: 'noopener' }, 'source')))));
+    const servingRows = Object.entries(ENGINES).filter(([, e]) => e.docs).map(([k, e]) => {
+      const sv = E.servingOf(k), src = sv.sources || {}, mb = sv.maxBatch;
+      const cap = sv.batching === 'slots' ? [`${sv.slots.default} slot${sv.slots.default === 1 ? '' : 's'} by default (`, h('code', null, sv.slots.env), '), full context reserved per slot']
+        : mb ? ['continuous, paged KV; ', h('code', null, mb.name), ' ', mb.value ? fmtNum(mb.value) : mb.tiers ? `${fmtNum(mb.tiers[0].value)} (${fmtNum(mb.default)} below ${mb.tiers[1].minGiB} GiB or on A100)` : `${fmtNum(mb.min)} to ${fmtNum(mb.max)} from the KV pool`] : 'continuous, paged KV';
+      const links = Object.entries(src).map(([what, url]) => h('a', { href: url, target: '_blank', rel: 'noopener' }, what));
+      return [h('b', null, e.name), h('span', null, cap), sv.pp === 'sequential' ? 'layer split, no TP' : 'tensor + pipeline', sv.multiNode ? 'many' : 'one',
+        sv.prefixCache === true ? 'shared' : sv.prefixCache === 'per-slot' ? 'per slot only' : 'no',
+        sv.hostCacheGB != null ? `host RAM, ${fmtGB(sv.hostCacheGB * 1e9)} cache` : 'host RAM', sv.spec ? (k === 'ollama' ? 'with a draft model' : 'yes') : 'no', sv.pd ? 'yes' : 'no', sv.dpAttention ? 'yes' : 'no',
+        sv.queueMax ? fmtNum(sv.queueMax) : 'unbounded', h('span', { class: 'vlink' }, ...links.flatMap((a) => [a, ' ']))];
+    });
+    $('#catEngines').replaceChildren(
+      table([''].concat(fams.map((f) => h('span', null, f.vendor, h('br'), f.name.replace(f.vendor + ' ', '').replace('Blackwell GB20x / GB10', 'GB20x, GB10')))), engRows, { cls: 'matrix' }),
+      h('h4', null, 'How each engine serves requests'),
+      table(['Engine', { t: 'Batching and cap', k: 'max-batch' }, { t: 'Multi-GPU', k: 'layer-split' }, 'Nodes', { t: 'Prefix cache', k: 'prefix-caching' }, { t: 'Idle sessions', k: 'retention' }, { t: 'Spec. decoding', k: 'spec' }, { t: 'PD split', k: 'pd' }, { t: 'DP attention', k: 'dp-attn' }, { t: 'Queue', k: 'queue-limit' }, 'Sources'], servingRows),
+      h('ul', { class: 'warnings', style: 'margin-top:10px' }, Object.values(ENGINES).filter((e) => e.docs).map((e) => h('li', null, h('b', null, `${e.name} (${e.version}, checked ${e.checked}${e.unverified ? ', not re-verified' : ''}): `), e.notes.join(' '), ' ', h('a', { href: e.docs.weights, target: '_blank', rel: 'noopener' }, 'source')))));
     const lint = catalogLint();
     $('#catLint').replaceChildren(...(lint.length ? [h('b', null, 'Consistency checks: '), h('ul', { class: 'warnings' }, lint.map((t) => h('li', null, h('span', { class: 'chip warn' }, 'check'), ' ', t)))] : [h('span', { class: 'chip good' }, 'ok'), " Every accelerator's TFLOPS columns agree with its chip generation."]));
     const mRows = allModels().map((m0) => {
       const m = E.norm(m0);
       const arch = m.attn.map((l) => `${l.n}× ${l.type}${l.window ? ' ' + fmtTok(l.window) : ''}`).join(' + ') + (m.sparse ? ` · sparse top-${m.sparse.topk}` : '');
-      return [h('b', null, m.name + (m.approx ? ' ~' : '')), m.family, fmtNum(m.params, 1), m.moe ? fmtNum(m.active, 1) : '—', fmtNum(m.layers), `${m.nHeads} / ${m.attn.some((l) => l.type === 'mla') ? 'MLA' : m.nKv}`, fmtGB(E.kvPerTokenFull(m, 'bf16')), fmtGB(E.kvAtCtx(m, 'bf16', 1e6)), fmtTok(m.maxCtx) + (m.nativeCtx && m.nativeCtx < m.maxCtx ? ` (${fmtTok(m.nativeCtx)} native)` : ''), arch, m.nativePrec ? m.nativePrec.toUpperCase() : '—', m.hf ? h('a', { href: 'https://huggingface.co/' + m.hf, target: '_blank', rel: 'noopener' }, m.hf) : '—', m.variants ? h('span', null, ...Object.entries(m.variants).map(([k, r]) => h('span', { class: 'vlink' }, h('a', { href: 'https://huggingface.co/' + r, target: '_blank', rel: 'noopener', title: r }, k.toUpperCase()), ' '))) : '—'];
+      return [h('b', null, m.name + (m.approx ? ' ~' : '')), m.family, fmtNum(m.params, 1), m.moe ? fmtNum(m.active, 1) : '-', fmtNum(m.layers), `${m.nHeads} / ${m.attn.some((l) => l.type === 'mla') ? 'MLA' : m.nKv}`, fmtGB(E.kvPerTokenFull(m, 'bf16')), fmtGB(E.kvAtCtx(m, 'bf16', 1e6)), fmtTok(m.maxCtx) + (m.nativeCtx && m.nativeCtx < m.maxCtx ? ` (${fmtTok(m.nativeCtx)} native)` : ''), arch, m.nativePrec ? m.nativePrec.toUpperCase() : '-', m.hf ? h('a', { href: 'https://huggingface.co/' + m.hf, target: '_blank', rel: 'noopener' }, m.hf) : '-', m.variants ? h('span', null, ...Object.entries(m.variants).map(([k, r]) => h('span', { class: 'vlink' }, h('a', { href: 'https://huggingface.co/' + r, target: '_blank', rel: 'noopener', title: r }, k.toUpperCase()), ' '))) : '-'];
     });
     $('#catModels').replaceChildren(table([{ t: 'Model', k: 'model' }, 'Family', { t: 'Params B', k: 'params' }, { t: 'Active B', k: 'active' }, { t: 'Layers', k: 'layers' }, { t: 'Heads / KV heads', k: 'heads' }, { t: 'KV per token (BF16)', k: 'kv-per-token' }, { t: 'KV per 1M-token session', k: 'kv-1m' }, { t: 'Max context', k: 'max-ctx' }, { t: 'Attention layers', k: 'attn-layers' }, { t: 'Ships in', k: 'ships-in' }, { t: 'Verified against', k: 'verified' }, { t: 'Known checkpoints', k: 'checkpoints' }], mRows, { numeric: [2, 3, 4, 5, 6, 7, 8] }));
   }
@@ -687,9 +752,18 @@
     initTooltips();
     renderGlossary();
     render();
+    let width = document.documentElement.clientWidth;
+    window.addEventListener('resize', () => { const w = document.documentElement.clientWidth; if (w !== width) { width = w; scheduleRender(); } });
   }
   const start = (data) => {
-    try { if (data && data.state) { state = Object.assign({}, DEFAULTS, data.state); state.adv = Object.assign({}, DEFAULTS.adv, state.adv || {}); } } catch (e) { /* ignore */ }
+    try { if (data && data.state) state = Common.freshState(data.state); } catch (e) { /* ignore */ }
+    // a link from the arcade (#plan=...) opens that setup on top of the defaults; the planner keeps its own candidate list
+    const linked = Common.decodePlan(location.hash);
+    if (linked) {
+      state = Common.freshState(Object.assign({ candidates: state.candidates, compatCtx: state.compatCtx }, linked, { mode: 'forward' }));
+      LS.set('cb.state', state);
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* file:// in some browsers */ }
+    }
     init();
   };
   try { if (window.claude && window.claude.hot && window.claude.hot.snapshot) window.claude.hot.snapshot(() => ({ state })); } catch (e) { /* ignore */ }

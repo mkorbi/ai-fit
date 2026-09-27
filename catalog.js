@@ -1,4 +1,4 @@
-/* catalog.js — hardware and model catalogs for AI Fit.
+/* catalog.js - hardware and model catalogs for AI Fit.
  *
  * Units
  *   mem      GB (decimal, 1e9 bytes) of accelerator memory
@@ -32,9 +32,9 @@ const NETWORKS = [
   { id: 'eth25',  name: '25 GbE, TCP',                                  gbps: 25,   latencyUs: 200 },
   { id: 'eth100', name: '100 GbE, RoCE',                                gbps: 100,  latencyUs: 90 },
   { id: 'eth200', name: '200 GbE, RoCE',                                gbps: 200,  latencyUs: 80 },
-  { id: 'ib400',  name: '400 Gb/s InfiniBand NDR or 400 GbE RoCE',      gbps: 400,  latencyUs: 60 },
+  { id: 'ib400',  name: '400 Gb/s InfiniBand NDR or RoCE',              gbps: 400,  latencyUs: 60 },
   { id: 'ib800',  name: '800 Gb/s InfiniBand XDR or 800 GbE',           gbps: 800,  latencyUs: 50 },
-  { id: 'ib3200', name: '8 × 400 Gb/s per node (3.2 Tb/s, DGX-class)',  gbps: 3200, latencyUs: 50 },
+  { id: 'ib3200', name: '8 × 400 Gb/s per node (3.2 Tb/s)',             gbps: 3200, latencyUs: 50 },
   { id: 'ib6400', name: '8 × 800 Gb/s per node (6.4 Tb/s)',             gbps: 6400, latencyUs: 45 },
 ];
 
@@ -65,17 +65,32 @@ const ARCHS = {
   apple:  { name: 'Apple GPU (Metal)',                  native: ['bf16'],                       weightOnly: ['int8', 'int4'], note: 'MLX and llama.cpp weight-only quantization; no FP8 or FP4 kernels' },
 };
 
-/* Inference-engine support, transcribed from each engine's own documentation on the date given (re-check when the
- * docs move on). Per weight format and hardware family: 'native' = kernels compute in that format,
- * 'weight-only' = weights stay quantized but matmuls run in BF16, absent = the engine cannot load it there.
- * kvCache lists the KV-cache dtypes the engine can run per family. The engine cannot exceed what ARCHS says the
- * silicon can do; the planner takes the weaker of the two. Families group the ARCHS keys. */
-const ENGINE_FAMILY = { sm80: 'ampere', sm86: 'ampere', sm89: 'ada', sm90: 'hopper', sm100: 'blackwell', sm103: 'blackwell', sm120: 'blackwell-sm120', sm121: 'blackwell-sm120', rubin: 'blackwell', gfx942: 'cdna3', gfx950: 'cdna4', cdna5: 'cdna4', gaudi3: 'gaudi', tpuv5e: 'tpu', tpuv5p: 'tpu', tpuv6e: 'tpu', tpuv7: 'tpu', trn2: 'other', apple: 'other' };
+/* Inference-engine support, transcribed from each engine's own documentation or source code on the date given (re-check
+ * when they move on).
+ *   families  hardware families the engine runs on at all (familiesSource says where that list comes from)
+ *   weights   per weight format and family: 'native' = kernels compute in that format, 'weight-only' = weights stay
+ *             quantized but matmuls run in BF16, absent = the engine cannot load it there
+ *   kvCache   KV-cache dtypes the engine can run per family
+ *   formats   engine-specific names and sizes, e.g. GGUF bits per weight (whole file, embeddings included)
+ *   serving   how requests are served; see SERVING_FULL in engine.js for every field and its default (a fully capable
+ *             continuous-batching engine). `sources` links each documented behavior.
+ * The engine cannot exceed what ARCHS says the silicon can do; the planner takes the weaker of the two. Families group
+ * the ARCHS keys. */
+const ENGINE_FAMILY = { sm80: 'ampere', sm86: 'ampere', sm89: 'ada', sm90: 'hopper', sm100: 'blackwell', sm103: 'blackwell', sm120: 'blackwell-sm120', sm121: 'blackwell-sm120', rubin: 'blackwell', gfx942: 'cdna3', gfx950: 'cdna4', cdna5: 'cdna4', gaudi3: 'gaudi', tpuv5e: 'tpu', tpuv5p: 'tpu', tpuv6e: 'tpu', tpuv7: 'tpu', trn2: 'trainium', apple: 'apple' };
+/* Display order and names of the families (Catalog view, coverage messages). */
+const ENGINE_FAMILIES = [
+  { id: 'ampere', vendor: 'NVIDIA', name: 'Ampere' }, { id: 'ada', vendor: 'NVIDIA', name: 'Ada Lovelace' }, { id: 'hopper', vendor: 'NVIDIA', name: 'Hopper' },
+  { id: 'blackwell', vendor: 'NVIDIA', name: 'Blackwell' }, { id: 'blackwell-sm120', vendor: 'NVIDIA', name: 'Blackwell GB20x / GB10' },
+  { id: 'cdna3', vendor: 'AMD', name: 'CDNA 3' }, { id: 'cdna4', vendor: 'AMD', name: 'CDNA 4' }, { id: 'gaudi', vendor: 'Intel', name: 'Gaudi' },
+  { id: 'tpu', vendor: 'Google', name: 'TPU' }, { id: 'trainium', vendor: 'AWS', name: 'Trainium' }, { id: 'apple', vendor: 'Apple', name: 'Apple silicon' },
+];
 const ENGINES = {
   none: { name: 'Hardware capability only', note: 'What the silicon can do, ignoring engine kernels. Pick an engine for what you can actually deploy.' },
   vllm: {
     name: 'vLLM', version: 'docs "latest"', checked: '2026-09-15',
     docs: { weights: 'https://docs.vllm.ai/en/latest/features/quantization/', kv: 'https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/' },
+    families: ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'gaudi', 'tpu', 'trainium', 'apple'],
+    familiesSource: { url: 'https://vllm.ai/#compatibility', checked: '2026-09-27', note: 'In tree: NVIDIA CUDA, AMD ROCm, Intel Gaudi. Plugins: Google TPU (tpu-inference), AWS Neuron (vllm-neuron), Apple silicon (vllm-metal).' },
     weights: {
       fp8:  { ampere: 'weight-only', ada: 'native', hopper: 'native', blackwell: 'native', 'blackwell-sm120': 'native', cdna3: 'native', cdna4: 'native', gaudi: 'native' },
       int8: { ampere: 'native', ada: 'native', hopper: 'native', blackwell: 'native', 'blackwell-sm120': 'native' },
@@ -83,6 +98,17 @@ const ENGINES = {
       fp4:  { ampere: 'weight-only', ada: 'weight-only', hopper: 'weight-only', blackwell: 'native', 'blackwell-sm120': 'native', cdna4: 'native' },
     },
     kvCache: { fp8: ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'gaudi'] },
+    serving: {
+      maxBatch: { name: 'max_num_seqs', tiers: [{ minGiB: 160, value: 1024 }, { minGiB: 70, value: 1024, notArch: ['sm80'] }], default: 256 },
+      sources: {
+        maxBatch: 'https://github.com/vllm-project/vllm/blob/main/vllm/engine/arg_utils.py',
+        prefixCache: 'https://docs.vllm.ai/en/latest/features/automatic_prefix_caching.html',
+        spec: 'https://docs.vllm.ai/en/latest/features/spec_decode.html',
+        pd: 'https://docs.vllm.ai/en/latest/features/disagg_prefill.html',
+        dpAttention: 'https://docs.vllm.ai/en/latest/serving/data_parallel_deployment.html',
+        host: 'https://docs.vllm.ai/en/latest/examples/others/lmcache.html',
+      },
+    },
     notes: [
       'Support table (AWQ, GPTQ, Marlin, llm-compressor INT8/FP8, bitsandbytes, GGUF) covers Volta through Hopper, AMD, Intel and CPU; Blackwell inherits the Hopper column plus native NVFP4 (ModelOpt / compressed-tensors NVFP4).',
       'FP8 W8A8 needs Ada or newer or AMD; on Ampere FP8 and FP4 checkpoints run through Marlin as weight-only.',
@@ -95,6 +121,8 @@ const ENGINES = {
   sglang: {
     name: 'SGLang', version: 'docs "latest"', checked: '2026-09-15',
     docs: { weights: 'https://docs.sglang.ai/advanced_features/quantization.html', kv: 'https://docs.sglang.ai/advanced_features/server_arguments.html' },
+    families: ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'tpu'],
+    familiesSource: { url: 'https://docs.sglang.io/', checked: '2026-09-27', note: 'NVIDIA, AMD, Intel Xeon CPUs, Google TPU, Ascend NPU and Moore Threads MUSA; no Gaudi, Trainium or Apple backend.' },
     weights: {
       fp8:  { ampere: 'weight-only', ada: 'native', hopper: 'native', blackwell: 'native', 'blackwell-sm120': 'native', cdna3: 'native', cdna4: 'native' },
       int8: { ampere: 'native', ada: 'native', hopper: 'native', blackwell: 'native', 'blackwell-sm120': 'native' },
@@ -102,6 +130,15 @@ const ENGINES = {
       fp4:  { ampere: 'weight-only', ada: 'weight-only', hopper: 'weight-only', blackwell: 'native', 'blackwell-sm120': 'native', cdna3: 'weight-only', cdna4: 'native' },
     },
     kvCache: { fp8: ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4'] },
+    serving: {
+      maxBatch: { name: 'max_running_requests', perTokens: 512, min: 2048, max: 4096 },
+      sources: {
+        maxBatch: 'https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/mem_cache/kv_cache_configurator.py',
+        spec: 'https://docs.sglang.io/advanced_features/speculative_decoding.html',
+        pd: 'https://docs.sglang.io/advanced_features/pd_disaggregation.html',
+        host: 'https://docs.sglang.io/advanced_features/hicache.html',
+      },
+    },
     notes: [
       'Method table: compressed-tensors on NVIDIA and AMD (Aiter FP8/MoE paths on AMD); awq_marlin and gptq_marlin are CUDA-only (plain gptq removed on NVIDIA and AMD); modelopt FP8 needs Hopper or newer.',
       'modelopt_fp4: native FP4 on SM100 and newer (flashinfer backends, SM120 via flashinfer_cutlass), Marlin W4A16 fallback on SM80 to SM90; petit_nvfp4 brings NVFP4 to MI250/MI300X/MI325X as weight-only; quark_mxfp4 runs MXFP4 natively on CDNA 4 (gfx95x).',
@@ -111,6 +148,8 @@ const ENGINES = {
   trtllm: {
     name: 'TensorRT-LLM', version: 'docs "latest" (PyTorch backend)', checked: '2026-09-15',
     docs: { weights: 'https://nvidia.github.io/TensorRT-LLM/features/quantization.html', kv: 'https://nvidia.github.io/TensorRT-LLM/features/quantization.html' },
+    families: ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120'],
+    familiesSource: { url: 'https://nvidia.github.io/TensorRT-LLM/reference/support-matrix.html', checked: '2026-09-27', note: 'NVIDIA GPUs only: Ampere, Ada Lovelace, Hopper, Blackwell.' },
     weights: {
       fp8:  { ada: 'native', hopper: 'native', blackwell: 'native', 'blackwell-sm120': 'native' },
       int8: {},
@@ -118,9 +157,59 @@ const ENGINES = {
       fp4:  { blackwell: 'native', 'blackwell-sm120': 'native' },
     },
     kvCache: { fp8: ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120'] },
+    serving: {
+      maxBatch: { name: 'max_batch_size', value: 2048 },
+      sources: {
+        maxBatch: 'https://github.com/NVIDIA/TensorRT-LLM/blob/main/tensorrt_llm/llmapi/llm_args.py',
+        prefixCache: 'https://nvidia.github.io/TensorRT-LLM/features/kvcache.html',
+        spec: 'https://nvidia.github.io/TensorRT-LLM/features/speculative-decoding.html',
+        pd: 'https://nvidia.github.io/TensorRT-LLM/features/disagg-serving.html',
+        host: 'https://nvidia.github.io/TensorRT-LLM/features/kvcache.html',
+      },
+    },
     notes: [
       'Hardware table: NVFP4 and MXFP4 on Blackwell (sm100/103 and sm120); FP8 per-tensor on Ada, Hopper and Blackwell, FP8 block scaling on Hopper and sm100/103, rowwise on Hopper only; W4A16 AWQ/GPTQ on Ampere through sm100/103 (W4A8 from Ada up) but not on sm120; FP8 KV cache on every generation from Ampere; NVFP4 KV cache on sm100/103 (not modeled here).',
       'INT8 (SmoothQuant) does not appear in the current PyTorch-backend matrix, so it is treated as unavailable. NVIDIA GPUs only. The same page also lists per-model-family support (e.g. NVFP4 for LLaMA 4, Mixtral, Qwen 3 and DeepSeek-R1), which this planner does not encode.',
+    ],
+  },
+  ollama: {
+    name: 'Ollama', version: 'main branch (runs llama.cpp llama-server)', checked: '2026-09-27',
+    docs: { weights: 'https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md', kv: 'https://docs.ollama.com/faq' },
+    families: ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'apple'],
+    familiesSource: { url: 'https://docs.ollama.com/gpu', checked: '2026-09-27', note: 'NVIDIA compute capability 5.0 and newer, AMD ROCm (Instinct MI100 to MI350X, Radeon), Apple Metal and MLX. No TPU, Gaudi or Trainium.' },
+    formats: {
+      w: { bf16: { label: 'F16 / BF16 (GGUF)' }, int8: { label: 'Q8_0 (GGUF)', bytes: 8.5008 / 8 }, int4: { label: 'Q4_K_M (GGUF)', bytes: 4.8944 / 8 }, fp4: { label: 'MXFP4 (GGUF)' } },
+      kv: { bf16: { label: 'f16' }, int8: { label: 'q8_0', bytes: 8.5 / 8 }, int4: { label: 'q4_0', bytes: 4.5 / 8 } },
+    },
+    weights: {
+      int8: { ampere: 'weight-only', ada: 'weight-only', hopper: 'weight-only', blackwell: 'weight-only', 'blackwell-sm120': 'weight-only', cdna3: 'weight-only', cdna4: 'weight-only', apple: 'weight-only' },
+      int4: { ampere: 'weight-only', ada: 'weight-only', hopper: 'weight-only', blackwell: 'weight-only', 'blackwell-sm120': 'weight-only', cdna3: 'weight-only', cdna4: 'weight-only', apple: 'weight-only' },
+      fp4:  { ampere: 'weight-only', ada: 'weight-only', hopper: 'weight-only', blackwell: 'weight-only', 'blackwell-sm120': 'weight-only', cdna3: 'weight-only', cdna4: 'weight-only', apple: 'weight-only' },
+    },
+    kvCache: { int8: ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'apple'], int4: ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'apple'] },
+    serving: {
+      batching: 'slots', slots: { default: 1, env: 'OLLAMA_NUM_PARALLEL' }, paged: false,
+      pp: 'sequential', maxTp: 1, multiNode: false,
+      prefixCache: 'per-slot', spec: true, pd: false, dpAttention: false,
+      retention: ['host', 'gpu', 'none'], hostCacheGB: 8192 * 2 ** 20 / 1e9,
+      queueMax: 512, queueEnv: 'OLLAMA_MAX_QUEUE',
+      ctxDefault: [{ belowGiB: 24, ctx: 4096 }, { belowGiB: 48, ctx: 32768 }, { ctx: 262144 }], ctxEnv: 'OLLAMA_CONTEXT_LENGTH',
+      sources: {
+        slots: 'https://github.com/ollama/ollama/blob/main/envconfig/config.go',
+        memory: 'https://docs.ollama.com/faq',
+        ctxDefault: 'https://docs.ollama.com/context-length',
+        split: 'https://github.com/ggml-org/llama.cpp/blob/master/common/common.h',
+        launch: 'https://github.com/ollama/ollama/blob/main/llm/llama_server.go',
+        host: 'https://github.com/ggml-org/llama.cpp/blob/master/common/common.h',
+      },
+    },
+    notes: [
+      'OLLAMA_NUM_PARALLEL defaults to 1 (envconfig/config.go): one request at a time per loaded model; OLLAMA_MAX_QUEUE (512) more wait, then requests are rejected.',
+      'Ollama starts llama.cpp llama-server with -c context × parallel and -np parallel (llm/llama_server.go), so every slot reserves its full context when the model loads: "Required RAM will scale by OLLAMA_NUM_PARALLEL * OLLAMA_CONTEXT_LENGTH" (FAQ).',
+      'Default context by VRAM: 4k below 24 GiB, 32k from 24 to 48 GiB, 256k above (docs: context length). Set OLLAMA_CONTEXT_LENGTH for longer sessions.',
+      'A model that fits one GPU stays on one GPU; a bigger one is spread across all GPUs by layers (llama.cpp split mode "layer"): memory adds up, speed does not. No tensor parallelism, one node.',
+      'KV cache types f16 (default), q8_0 and q4_0 (OLLAMA_KV_CACHE_TYPE, needs flash attention). Weights are GGUF: Q4_K_M 4.89 and Q8_0 8.50 bits per weight on Llama 3.1 8B (llama.cpp quantize README); no FP8.',
+      'Prompt prefixes are reused per slot, not shared across slots; idle slots are saved to llama-server\'s host prompt cache (--cache-ram, 8192 MiB default, not overridden by Ollama). Speculative decoding needs a draft model (DRAFT in the Modelfile).',
     ],
   },
 };
@@ -196,9 +285,9 @@ const MODELS = [
   { id: 'qwen2.5-7b', hf: 'Qwen/Qwen2.5-7B-Instruct',       family: 'Qwen',        name: 'Qwen2.5 7B',                          params: 7.6,   layers: 28,  dModel: 3584,  nHeads: 28,  nKv: 4,  dHead: 128, maxCtx: 131072, nativeCtx: 32768, nativePrec: 'bf16', variants: { fp8: 'RedHatAI/Qwen2.5-7B-Instruct-FP8-dynamic', int8: 'Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8', int4: 'Qwen/Qwen2.5-7B-Instruct-AWQ' } },
   { id: 'qwen2.5-32b', hf: 'Qwen/Qwen2.5-Coder-32B-Instruct',      family: 'Qwen',        name: 'Qwen2.5 32B / Coder 32B',             params: 32.5,  layers: 64,  dModel: 5120,  nHeads: 40,  nKv: 8,  dHead: 128, maxCtx: 131072, nativeCtx: 32768, nativePrec: 'bf16', variants: { fp8: 'RedHatAI/Qwen2.5-Coder-32B-Instruct-FP8-dynamic', int8: 'Qwen/Qwen2.5-Coder-32B-Instruct-GPTQ-Int8', int4: 'Qwen/Qwen2.5-Coder-32B-Instruct-AWQ', fp4: 'drawais/Qwen2.5-Coder-32B-Instruct-NVFP4' } },
   { id: 'qwen2.5-72b', hf: 'Qwen/Qwen2.5-72B-Instruct',      family: 'Qwen',        name: 'Qwen2.5 72B',                         params: 72.7,  layers: 80,  dModel: 8192,  nHeads: 64,  nKv: 8,  dHead: 128, maxCtx: 131072, nativeCtx: 32768, nativePrec: 'bf16', variants: { fp8: 'RedHatAI/Qwen2.5-72B-Instruct-FP8-dynamic', int8: 'Qwen/Qwen2.5-72B-Instruct-GPTQ-Int8', int4: 'Qwen/Qwen2.5-72B-Instruct-AWQ', fp4: 'enfuse/Qwen2.5-72B-Instruct-NVFP4' } },
-  { id: 'qwen3-8b', hf: 'Qwen/Qwen3-8B',         family: 'Qwen',        name: 'Qwen3 8B',                            params: 8.2,   layers: 36,  dModel: 4096,  nHeads: 32,  nKv: 8,  dHead: 128, maxCtx: 131072, nativeCtx: 32768, nativeCtx: 40960, nativePrec: 'bf16', variants: { fp8: 'Qwen/Qwen3-8B-FP8', int4: 'Qwen/Qwen3-8B-AWQ', fp4: 'nvidia/Qwen3-8B-NVFP4' } },
-  { id: 'qwen3-14b', hf: 'Qwen/Qwen3-14B',        family: 'Qwen',        name: 'Qwen3 14B',                           params: 14.8,  layers: 40,  dModel: 5120,  nHeads: 40,  nKv: 8,  dHead: 128, maxCtx: 131072, nativeCtx: 32768, nativeCtx: 40960, nativePrec: 'bf16', variants: { fp8: 'Qwen/Qwen3-14B-FP8', int4: 'Qwen/Qwen3-14B-AWQ', fp4: 'nvidia/Qwen3-14B-NVFP4' } },
-  { id: 'qwen3-32b', hf: 'Qwen/Qwen3-32B',        family: 'Qwen',        name: 'Qwen3 32B',                           params: 32.8,  layers: 64,  dModel: 5120,  nHeads: 64,  nKv: 8,  dHead: 128, maxCtx: 131072, nativeCtx: 32768, nativeCtx: 40960, nativePrec: 'bf16', variants: { fp8: 'Qwen/Qwen3-32B-FP8', int4: 'Qwen/Qwen3-32B-AWQ', fp4: 'nvidia/Qwen3-32B-NVFP4' } },
+  { id: 'qwen3-8b', hf: 'Qwen/Qwen3-8B',         family: 'Qwen',        name: 'Qwen3 8B',                            params: 8.2,   layers: 36,  dModel: 4096,  nHeads: 32,  nKv: 8,  dHead: 128, maxCtx: 131072, nativeCtx: 40960, nativePrec: 'bf16', variants: { fp8: 'Qwen/Qwen3-8B-FP8', int4: 'Qwen/Qwen3-8B-AWQ', fp4: 'nvidia/Qwen3-8B-NVFP4' } },
+  { id: 'qwen3-14b', hf: 'Qwen/Qwen3-14B',        family: 'Qwen',        name: 'Qwen3 14B',                           params: 14.8,  layers: 40,  dModel: 5120,  nHeads: 40,  nKv: 8,  dHead: 128, maxCtx: 131072, nativeCtx: 40960, nativePrec: 'bf16', variants: { fp8: 'Qwen/Qwen3-14B-FP8', int4: 'Qwen/Qwen3-14B-AWQ', fp4: 'nvidia/Qwen3-14B-NVFP4' } },
+  { id: 'qwen3-32b', hf: 'Qwen/Qwen3-32B',        family: 'Qwen',        name: 'Qwen3 32B',                           params: 32.8,  layers: 64,  dModel: 5120,  nHeads: 64,  nKv: 8,  dHead: 128, maxCtx: 131072, nativeCtx: 40960, nativePrec: 'bf16', variants: { fp8: 'Qwen/Qwen3-32B-FP8', int4: 'Qwen/Qwen3-32B-AWQ', fp4: 'nvidia/Qwen3-32B-NVFP4' } },
   { id: 'qwen3-30b-a3b', hf: 'Qwen/Qwen3-30B-A3B-Instruct-2507',    family: 'Qwen',        name: 'Qwen3-30B-A3B (2507)',                params: 30.5,  active: 3.3, layers: 48, dModel: 2048, nHeads: 32, nKv: 4, dHead: 128, moe: { experts: 128, active: 8 }, maxCtx: 1010000, nativeCtx: 262144, nativePrec: 'bf16', variants: { fp8: 'Qwen/Qwen3-30B-A3B-Instruct-2507-FP8', int8: 'RedHatAI/Qwen3-30B-A3B-Instruct-2507-quantized.w8a8', int4: 'RedHatAI/Qwen3-30B-A3B-Instruct-2507-quantized.w4a16', fp4: 'nvidia/Qwen3-30B-A3B-NVFP4' } },
   { id: 'qwen3-235b-a22b', hf: 'Qwen/Qwen3-235B-A22B-Instruct-2507',  family: 'Qwen',        name: 'Qwen3-235B-A22B (2507)',              params: 235,   active: 22,  layers: 94, dModel: 4096, nHeads: 64, nKv: 4, dHead: 128, moe: { experts: 128, active: 8 }, maxCtx: 1010000, nativeCtx: 262144, nativePrec: 'bf16', variants: { fp8: 'Qwen/Qwen3-235B-A22B-Instruct-2507-FP8', int4: 'QuantTrio/Qwen3-235B-A22B-Instruct-2507-AWQ', fp4: 'nvidia/Qwen3-235B-A22B-NVFP4' } },
   { id: 'qwen3-coder-480b', hf: 'Qwen/Qwen3-Coder-480B-A35B-Instruct', family: 'Qwen',        name: 'Qwen3-Coder-480B-A35B',               params: 480,   active: 35,  layers: 62, dModel: 6144, nHeads: 96, nKv: 8, dHead: 128, moe: { experts: 160, active: 8 }, maxCtx: 1010000, nativeCtx: 262144, nativePrec: 'bf16', variants: { fp8: 'Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8', int4: 'QuantTrio/Qwen3-Coder-480B-A35B-Instruct-AWQ', fp4: 'nvidia/Qwen3-Coder-480B-A35B-Instruct-NVFP4' } },
@@ -207,7 +296,7 @@ const MODELS = [
   { id: 'deepseek-v3.2', hf: 'deepseek-ai/DeepSeek-V3.2', hfMirror: 'deepseek-ai/DeepSeek-V3.2-Exp',    family: 'DeepSeek',    name: 'DeepSeek-V3.2 (sparse attention)',    params: 671,   active: 37,  layers: 61, dModel: 7168, nHeads: 128, nKv: 128, dHead: 192, attn: [{ n: 61, type: 'mla', dc: 512, dr: 64 }], moe: { experts: 256, active: 8 }, sparse: { topk: 2048 }, maxCtx: 163840, note: 'MLA plus DeepSeek Sparse Attention (top-2048 tokens); config allows 160k positions, DeepSeek documents 128k', nativePrec: 'fp8', variants: { fp8: 'deepseek-ai/DeepSeek-V3.2', int4: 'QuantTrio/DeepSeek-V3.2-AWQ', fp4: 'nvidia/DeepSeek-V3.2-NVFP4' } },
   { id: 'kimi-k2', hf: 'moonshotai/Kimi-K2-Instruct-0905',          family: 'Moonshot',    name: 'Kimi K2 / K2 Thinking / K2.5',        params: 1026,  active: 32,  layers: 61, dModel: 7168, nHeads: 64, nKv: 64, dHead: 192, attn: [{ n: 61, type: 'mla', dc: 512, dr: 64 }], moe: { experts: 384, active: 8 }, maxCtx: 262144, note: 'Multi-head latent attention', nativePrec: 'fp8', variants: { fp8: 'moonshotai/Kimi-K2-Instruct-0905', int4: 'moonshotai/Kimi-K2-Thinking', fp4: 'nvidia/Kimi-K2-Thinking-NVFP4' } },
   { id: 'glm-4.5-air', hf: 'zai-org/GLM-4.5-Air',      family: 'Zhipu GLM',   name: 'GLM-4.5-Air 106B-A12B',               params: 106,   active: 12,  layers: 46, dModel: 4096, nHeads: 96, nKv: 8, dHead: 128, moe: { experts: 128, active: 8 }, maxCtx: 131072, nativePrec: 'bf16', variants: { fp8: 'zai-org/GLM-4.5-Air-FP8', int4: 'cyankiwi/GLM-4.5-Air-AWQ-4bit', fp4: 'Firworks/GLM-4.5-Air-nvfp4' } },
-  { id: 'glm-4.6', hf: 'zai-org/GLM-4.6',          family: 'Zhipu GLM',   name: 'GLM-4.5 / 4.6 / 4.7 355B-A32B',       params: 355,   active: 32,  layers: 92, dModel: 5120, nHeads: 96, nKv: 8, dHead: 128, moe: { experts: 160, active: 8 }, maxCtx: 204800, maxCtx: 202752, nativePrec: 'bf16', variants: { fp8: 'zai-org/GLM-4.6-FP8', int4: 'QuantTrio/GLM-4.6-AWQ', fp4: 'RedHatAI/GLM-4.6-NVFP4' } },
+  { id: 'glm-4.6', hf: 'zai-org/GLM-4.6',          family: 'Zhipu GLM',   name: 'GLM-4.5 / 4.6 / 4.7 355B-A32B',       params: 355,   active: 32,  layers: 92, dModel: 5120, nHeads: 96, nKv: 8, dHead: 128, moe: { experts: 160, active: 8 }, maxCtx: 202752, nativePrec: 'bf16', variants: { fp8: 'zai-org/GLM-4.6-FP8', int4: 'QuantTrio/GLM-4.6-AWQ', fp4: 'RedHatAI/GLM-4.6-NVFP4' } },
   { id: 'gpt-oss-20b', hf: 'openai/gpt-oss-20b',      family: 'OpenAI',      name: 'gpt-oss-20b',                         params: 20.9,  active: 3.6, layers: 24, dModel: 2880, nHeads: 64, nKv: 8, dHead: 64, attn: [{ n: 12, type: 'swa', window: 128 }, { n: 12, type: 'full' }], moe: { experts: 32, active: 4 }, maxCtx: 131072, note: 'Alternating 128-token sliding window and full attention; MXFP4 experts', nativePrec: 'fp4 (MXFP4)', variants: { fp4: 'openai/gpt-oss-20b', int8: 'amd/gpt-oss-20b-BF16-w8a8-llmcompressor' } },
   { id: 'gpt-oss-120b', hf: 'openai/gpt-oss-120b',     family: 'OpenAI',      name: 'gpt-oss-120b',                        params: 116.8, active: 5.1, layers: 36, dModel: 2880, nHeads: 64, nKv: 8, dHead: 64, attn: [{ n: 18, type: 'swa', window: 128 }, { n: 18, type: 'full' }], moe: { experts: 128, active: 4 }, maxCtx: 131072, note: 'Alternating 128-token sliding window and full attention; MXFP4 experts', nativePrec: 'fp4 (MXFP4)', variants: { fp4: 'openai/gpt-oss-120b', bf16: 'axolotl-ai-co/gpt-oss-120b-dequantized' } },
   { id: 'gemma-3-4b', hf: 'google/gemma-3-4b-it', hfMirror: 'unsloth/gemma-3-4b-it',       family: 'Google Gemma', name: 'Gemma 3 4B',                         params: 4.3,   layers: 34,  dModel: 2560,  nHeads: 8,   nKv: 4,  dHead: 256, attn: [{ n: 29, type: 'swa', window: 1024 }, { n: 5, type: 'full' }], maxCtx: 131072, note: '5 local (1k window) layers per global layer', nativePrec: 'bf16', variants: { fp8: 'RedHatAI/gemma-3-4b-it-FP8-dynamic', int4: 'RedHatAI/gemma-3-4b-it-quantized.w4a16' } },
@@ -215,7 +304,7 @@ const MODELS = [
   { id: 'gemma-3-27b', hf: 'google/gemma-3-27b-it', hfMirror: 'unsloth/gemma-3-27b-it',      family: 'Google Gemma', name: 'Gemma 3 27B',                        params: 27.4,  layers: 62,  dModel: 5376,  nHeads: 32,  nKv: 16, dHead: 128, attn: [{ n: 52, type: 'swa', window: 1024 }, { n: 10, type: 'full' }], maxCtx: 131072, note: '5 local (1k window) layers per global layer', nativePrec: 'bf16', variants: { fp8: 'RedHatAI/gemma-3-27b-it-FP8-dynamic', int8: 'RedHatAI/gemma-3-27b-it-quantized.w8a8', int4: 'RedHatAI/gemma-3-27b-it-quantized.w4a16', fp4: 'NeoChen1024/gemma-3-27b-it-NVFP4' } },
   { id: 'phi-4', hf: 'microsoft/phi-4',            family: 'Microsoft',   name: 'Phi-4 14B',                           params: 14.7,  layers: 40,  dModel: 5120,  nHeads: 40,  nKv: 10, dHead: 128, maxCtx: 16384, nativePrec: 'bf16', variants: { fp8: 'RedHatAI/phi-4-FP8-dynamic', int8: 'RedHatAI/phi-4-quantized.w8a8', int4: 'RedHatAI/phi-4-quantized.w4a16' } },
   { id: 'command-a', hf: 'CohereLabs/c4ai-command-a-03-2025', hfMirror: 'unsloth/c4ai-command-a-03-2025',        family: 'Cohere',      name: 'Command A 111B',                      params: 111,   layers: 64,  dModel: 12288, nHeads: 96,  nKv: 8,  dHead: 128, attn: [{ n: 48, type: 'swa', window: 4096 }, { n: 16, type: 'full' }], maxCtx: 262144, note: '3 sliding-window (4k) layers per full layer', nativePrec: 'bf16', variants: { fp8: 'aikitoria/c4ai-command-a-03-2025-FP8-Dynamic', int4: 'gghfez/c4ai-command-a-03-2025-AWQ', fp4: 'Firworks/c4ai-command-a-03-2025-nvfp4' } },
-  { id: 'minimax-m1', hf: 'MiniMaxAI/MiniMax-M1-80k',       family: 'MiniMax',     name: 'MiniMax-M1 456B-A46B',                params: 456,   active: 45.9, layers: 80, dModel: 6144, nHeads: 64, nKv: 8, dHead: 128, attn: [{ n: 70, type: 'linear' }, { n: 10, type: 'full' }], moe: { experts: 32, active: 2 }, statePerSeqMB: 60, maxCtx: 10240000, note: 'Hybrid lightning attention (7:1); shape approximate', note: 'Hybrid lightning attention (7:1); config allows 10M positions, MiniMax documents 1M', nativePrec: 'bf16', variants: { int4: 'justinjja/MiniMax-M1-80k-W4A16-INT4' } },
+  { id: 'minimax-m1', hf: 'MiniMaxAI/MiniMax-M1-80k',       family: 'MiniMax',     name: 'MiniMax-M1 456B-A46B',                params: 456,   active: 45.9, layers: 80, dModel: 6144, nHeads: 64, nKv: 8, dHead: 128, attn: [{ n: 70, type: 'linear' }, { n: 10, type: 'full' }], moe: { experts: 32, active: 2 }, statePerSeqMB: 60, maxCtx: 10240000, note: 'Hybrid lightning attention (7:1); config allows 10M positions, MiniMax documents 1M', nativePrec: 'bf16', variants: { int4: 'justinjja/MiniMax-M1-80k-W4A16-INT4' } },
 ];
 
-if (typeof module !== 'undefined') module.exports = { LINKS, NETWORKS, ARCHS, ENGINE_FAMILY, ENGINES, HARDWARE, MODELS };
+if (typeof module !== 'undefined') module.exports = { LINKS, NETWORKS, ARCHS, ENGINE_FAMILY, ENGINE_FAMILIES, ENGINES, HARDWARE, MODELS };

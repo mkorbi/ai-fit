@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* check-sources.js — verify that every accelerator's source page still resolves and still mentions its key numbers.
+/* check-sources.js - verify that every accelerator's source page still resolves and still mentions its key numbers.
  *   node tools/check-sources.js [ids...]
  * The number check is a heuristic text search (pages are marketing HTML), so "not found" means "look", not "wrong".
  */
