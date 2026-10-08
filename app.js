@@ -292,6 +292,7 @@
       else if (state.mode === 'reverse') renderReverse();
       else if (state.mode === 'compat') renderCompat();
       else if (state.mode === 'catalog') renderCatalog();
+      if (state.mode === 'arcade') Arcade.render($('#viewArcade')); else Arcade.pause();
     } catch (err) {
       const v = $('#verdict'); if (v) { v.className = 'verdict bad'; v.replaceChildren(h('strong', null, 'Something went wrong while computing.'), h('p', null, String(err && err.message || err))); }
       console.error(err);
@@ -618,6 +619,11 @@
       ] });
     $('#revTable').replaceChildren(table([{ t: 'Accelerator', k: 'accelerator' }, 'Count', { t: 'Nodes', k: 'nodes' }, { t: 'Layout', k: 'layout-col' }, { t: 'tok/s per user', k: 'speed-per-user' }, { t: 'TTFT', k: 'ttft' }, { t: 'KV pool', k: 'kv-pool' }, { t: '$ / hour', k: 'cost-hour' }, { t: '$ / 1M tok', k: 'cost-token' }, { t: 'kW', k: 'kw' }, ''], rows, { numeric: [1, 2, 4, 5, 6, 7, 8, 9] }));
   }
+  window.openArcadeInPlanner = (s) => {
+    const hw = hwById(s.hw);
+    Object.assign(state, { mode: 'forward', hw: s.hw, count: s.count, nodeGpus: hw.nodeGpus, link: 'auto', model: s.model, wPrec: s.wPrec, kvPrec: s.kvPrec, engine: 'none', par: 'auto', users: s.users, activityPreset: 'custom', activity: Math.round(s.activity * 100), ctx: s.ctx, prefix: s.prefix || 0, newPrompt: 500, output: 300, retention: s.retention, prefixCache: !!s.prefixCache, spec: !!s.spec });
+    syncInputs(); scheduleRender(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
   function openInPlanner(r) {
     Object.assign(state, { mode: 'forward', hw: r.hw.id, count: r.total, nodeGpus: r.hw.nodeGpus, link: 'auto', par: 'manual', tp: r.tp, pp: r.pp, reps: r.R });
     syncInputs(); scheduleRender(); window.scrollTo({ top: 0, behavior: 'smooth' });
