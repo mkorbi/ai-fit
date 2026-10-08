@@ -189,40 +189,48 @@ dl.glossary dt { font-family: var(--font-display); font-weight: 600; font-size: 
 dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .gmeta { font-size: 12.5px; margin-top: 2px; }
 
-/* arcade */
-.arcade { display: grid; gap: 14px; max-width: 980px; }
-.arc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px; }
-.arc-level, .arc-stars, .arc-win, .arc-fail, .pxbtn, .arc-chip span { font-family: 'Press Start 2P', var(--font-mono); }
-.arc-level { font-size: 10px; color: var(--accent); letter-spacing: 0.04em; }
-.arc-title { font-size: 22px; }
-.arc-stars { font-size: 12px; color: var(--warn); margin-left: auto; }
-.arc-mission { font-size: 15px; max-width: 70ch; }
-.arc-stage { background: #0d1117; border: 3px solid var(--line); box-shadow: 4px 4px 0 var(--line); padding: 8px; display: grid; gap: 8px; }
-.arc-canvas { width: 100%; height: auto; aspect-ratio: 16 / 9; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
-.arc-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: #c3c8ce; }
-.arc-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.arc-legend i { display: inline-block; width: 10px; height: 10px; }
-.arc-hud { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; }
-.arc-chip { background: var(--surface); border: 2px solid var(--line); padding: 6px 8px; display: grid; gap: 4px; min-width: 0; }
-.arc-chip span { font-size: 8px; color: var(--muted); letter-spacing: 0.02em; }
-.arc-chip b { font-family: var(--font-mono); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
-.arc-chip.good b { color: var(--good-text); } .arc-chip.bad b { color: var(--crit-text); }
-.arc-knobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
-.arc-knob { display: grid; gap: 4px; background: var(--surface); border: 2px solid var(--line); padding: 8px 10px; }
-.arc-klabel { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-display); font-weight: 600; justify-self: start; }
-.arc-kctl { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; }
-.arc-val { font-family: var(--font-mono); font-size: 13px; text-align: center; min-width: 0; overflow-wrap: anywhere; }
+/* simulator */
+.sim { display: grid; gap: 14px; max-width: 1000px; }
+.sim-title { font-size: 22px; }
+.sim-sub { max-width: 80ch; color: var(--ink-2); }
+.sim-presets, .sim-controls, .sim-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sim-plabel, .sim-limit, .sim-clock, .pxbtn, .sim-chip > span, .sim-chip > .term, .sim-ctitle, .sim-barv, .sim-barl { font-family: 'Press Start 2P', var(--font-mono); }
+.sim-plabel { font-size: 9px; color: var(--muted); margin-right: 4px; }
+.sim-clock { font-size: 9px; color: var(--muted); margin-left: auto; }
+.sim-stage { background: #0d1117; border: 3px solid var(--line); box-shadow: 4px 4px 0 var(--line); padding: 8px; display: grid; gap: 8px; }
+.sim-canvas { width: 100%; height: auto; aspect-ratio: 16 / 9; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+.sim-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: #c3c8ce; }
+.sim-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sim-legend i { display: inline-block; width: 10px; height: 10px; }
+.sim-hud { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 6px; }
+.sim-chip { background: var(--surface); border: 2px solid var(--line); padding: 6px 8px; display: grid; gap: 4px; min-width: 0; }
+.sim-chip > span, .sim-chip > .term { font-size: 8px; color: var(--muted); letter-spacing: 0.02em; line-height: 1.5; }
+.sim-chip b { font-family: var(--font-mono); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.sim-chip.good b { color: var(--good-text); } .sim-chip.bad b { color: var(--crit-text); }
+.sim-explain { display: grid; gap: 8px; background: var(--surface); border: 2px solid var(--line); padding: 12px 14px; }
+.sim-explain p { max-width: 80ch; color: var(--ink-2); }
+.sim-limit { font-size: 10px; letter-spacing: 0.04em; }
+.sim-limit.good { color: var(--good-text); } .sim-limit.bad { color: var(--crit-text); }
+.sim-knobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+.sim-knob { display: grid; gap: 4px; background: var(--surface); border: 2px solid var(--line); padding: 8px 10px; }
+.sim-knob > .term { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-display); font-weight: 600; justify-self: start; }
+.sim-kctl { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; }
+.sim-val { font-family: var(--font-mono); font-size: 12.5px; text-align: center; min-width: 0; overflow-wrap: anywhere; }
 .pxbtn { font-size: 10px; padding: 8px 10px; background: var(--surface); color: var(--ink); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); cursor: pointer; line-height: 1; }
 .pxbtn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
-.pxbtn:disabled { opacity: 0.35; cursor: not-allowed; }
-.pxbtn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); box-shadow: 3px 3px 0 var(--ink); }
+.pxbtn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .pxbtn.go { background: var(--good); color: #fff; border-color: var(--good-text); box-shadow: 3px 3px 0 var(--good-text); font-size: 11px; padding: 10px 14px; }
 .pxbtn.ghost { box-shadow: none; border-color: var(--line); color: var(--ink-2); }
-.arc-feedback { display: grid; gap: 10px; background: var(--surface); border: 2px solid var(--line); padding: 12px 14px; }
-.arc-win { font-size: 12px; color: var(--good-text); }
-.arc-fail { font-size: 10px; line-height: 1.7; color: var(--crit-text); }
-.arc-lesson { max-width: 72ch; color: var(--ink-2); }
-.arc-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sim-sweeps { display: grid; gap: 14px; background: var(--surface); border: 2px solid var(--line); padding: 12px 14px; }
+.sim-sweeps h3 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.sim-chart { display: grid; gap: 6px; }
+.sim-ctitle { font-size: 9px; color: var(--ink-2); }
+.sim-bars { display: flex; align-items: flex-end; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.sim-bar { display: grid; justify-items: center; gap: 3px; min-width: 56px; }
+.sim-bar i { display: block; width: 24px; background: var(--s1); }
+.sim-bar.on i { background: var(--accent); }
+.sim-barv { font-size: 8px; color: var(--ink); }
+.sim-barl { font-size: 7px; color: var(--muted); text-align: center; max-width: 72px; line-height: 1.5; }
 
 /* catalog & method */
 .vlink a { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; text-decoration: none; border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px; margin-right: 3px; }
@@ -246,7 +254,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
     <button class="tab" role="tab" data-mode="compat" aria-selected="false" type="button">Compatibility</button>
     <button class="tab" role="tab" data-mode="catalog" aria-selected="false" type="button">Catalog</button>
     <button class="tab" role="tab" data-mode="method" aria-selected="false" type="button">Method</button>
-    <button class="tab" role="tab" data-mode="arcade" aria-selected="false" type="button">Arcade</button>
+    <button class="tab" role="tab" data-mode="sim" aria-selected="false" type="button">Simulator</button>
   </nav>
 </header>
 
@@ -377,7 +385,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
       </div>
     </div>
 
-    <div class="view" data-mode="arcade" id="viewArcade" hidden></div>
+    <div class="view" data-mode="sim" id="viewSim" hidden></div>
 
     <div class="view" data-mode="method" id="viewMethod" hidden>
       <section class="panel prose">
@@ -425,7 +433,7 @@ step   = (max(t_bw, t_comp) + t_comm) · (1 + bubble · (PP − 1) / PP)</pre>
 <script src="catalog.js"></script>
 <script src="glossary.js"></script>
 <script src="engine.js"></script>
-<script src="game.js"></script>
+<script src="sim.js"></script>
 <script src="app.js"></script>
 
 </body>

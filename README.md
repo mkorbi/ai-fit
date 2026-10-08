@@ -14,16 +14,17 @@ network between nodes, then a model and a workload, and it tells you:
 The reverse direction works too: give it users, context, model and targets and it sizes the smallest layout per
 candidate accelerator, sorted by count and price.
 
-## Arcade
+## Simulator
 
-The Arcade tab is a pixel-art game on top of the same engine. A rack of GPUs fills with weights (blue), runtime
-overhead and headroom (grey) and one coloured block per person's KV cache; a crowd of pixel users streams tokens at
-the speed the engine predicts, stalls when they are slow, and walks away when they do not fit. Eleven missions each
-isolate one relationship, in order: weights versus GPU memory, sessions as boxes, context as the multiplier, KV-cache
-precision, weight precision, GPU memory per device, model architecture (GQA versus MLA versus hybrid attention),
-bandwidth and speculative decoding, shared-prefix caching, time to first token, and cost under a budget. A free-play
-mode exposes every knob and hands the setup to the planner. `node tests/arcade.js` checks that every mission loses
-from its start state and wins with the intended move, so the game stays consistent with the model.
+The Simulator tab is a pixel-art serving simulation on the same engine. A rack of GPUs fills with weights (blue),
+runtime overhead and headroom (grey) and one coloured block per active person's KV cache; parked sessions sit in a
+host-RAM strip or stay dimmed in the rack, depending on the retention setting. Pixel people think, wait for a free
+slot, wait for their first token, stream tokens at the speed the engine predicts for the current number of active
+people, and go back to thinking. Every knob is live (GPU type and count, model, weight and KV precision, context,
+people, activity, wanted speed, retention, prefix caching, speculative decoding), presets give starting points, a
+"what limits you" line names the binding constraint, and bar charts show how many people the setup serves if you
+change one thing: context, GPU type, model, KV precision or weight precision. `node tests/sim.js` checks the presets
+and the sweeps.
 
 ## Run it
 
@@ -53,8 +54,8 @@ sed '1,/^<body>$/d; /^<\/body>$/,$d' index.html > artifact.html
 | File | What it holds |
 |---|---|
 | `catalog.js` | Accelerators (memory, bandwidth, dense TFLOPS per precision, fabric, node size, TDP, rough price, chip generation), the `ARCHS` generation → format table, and models (shape, attention layer types, MoE, context limits, shipped precision, Hugging Face repo) |
-| `game.js` | The Arcade: pixel-art stage drawn on a canvas, missions, knobs and feedback, all computed by the engine |
-| `tests/arcade.js` | Mission consistency test (start state loses, intended move wins) |
+| `sim.js` | The Simulator: pixel-art serving simulation on a canvas, knobs, presets, limit explanation and one-knob sweeps, all computed by the engine |
+| `tests/sim.js` | Simulator consistency test (presets load, people never grow with context) |
 | `tools/import-model.js` | Derives or verifies model entries from Hugging Face `config.json` and safetensors metadata; finds and verifies quantized checkpoints (node 18+, no dependencies) |
 | `tools/check-sources.js` | Verifies every accelerator's source page resolves and still shows its numbers |
 | `tests/anchors.js` | Calibration anchors: published fit statements and measured numbers the model must reproduce |
