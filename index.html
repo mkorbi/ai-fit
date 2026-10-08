@@ -190,7 +190,13 @@ dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .gmeta { font-size: 12.5px; margin-top: 2px; }
 
 /* simulator */
-.sim { display: grid; gap: 14px; max-width: 1000px; }
+.sim { display: grid; gap: 14px; max-width: 1180px; }
+.sim-board { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
+@media (min-width: 900px) { .sim-board { grid-template-columns: 184px minmax(0, 1fr) 184px; } }
+.sim-col { display: grid; gap: 6px; align-content: start; }
+.sim-coltitle { font-family: 'Press Start 2P', var(--font-mono); font-size: 8px; color: var(--muted); letter-spacing: 0.04em; padding: 2px 0; }
+.sim-center { display: grid; gap: 10px; min-width: 0; }
+@media (max-width: 899px) { .sim-col { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
 .sim-title { font-size: 22px; }
 .sim-sub { max-width: 80ch; color: var(--ink-2); }
 .sim-presets, .sim-controls, .sim-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -211,11 +217,11 @@ dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .sim-explain p { max-width: 80ch; color: var(--ink-2); }
 .sim-limit { font-size: 10px; letter-spacing: 0.04em; }
 .sim-limit.good { color: var(--good-text); } .sim-limit.bad { color: var(--crit-text); }
-.sim-knobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
-.sim-knob { display: grid; gap: 4px; background: var(--surface); border: 2px solid var(--line); padding: 8px 10px; }
-.sim-knob > .term { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-display); font-weight: 600; justify-self: start; }
-.sim-kctl { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; }
-.sim-val { font-family: var(--font-mono); font-size: 12.5px; text-align: center; min-width: 0; overflow-wrap: anywhere; }
+.sim-knob { display: grid; gap: 3px; background: var(--surface); border: 2px solid var(--line); padding: 6px 8px; }
+.sim-knob > .term { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-display); font-weight: 600; justify-self: start; }
+.sim-kctl { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px; }
+.sim-kctl .pxbtn { padding: 6px 7px; font-size: 9px; }
+.sim-val { font-family: var(--font-mono); font-size: 12px; line-height: 1.25; text-align: center; min-width: 0; overflow-wrap: anywhere; }
 .pxbtn { font-size: 10px; padding: 8px 10px; background: var(--surface); color: var(--ink); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); cursor: pointer; line-height: 1; }
 .pxbtn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
 .pxbtn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
