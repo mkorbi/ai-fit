@@ -197,7 +197,11 @@ dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .sim-plabel { font-size: 9px; color: var(--muted); margin-right: 4px; }
 .sim-clock { font-size: 9px; color: var(--muted); margin-left: auto; }
 .sim-stage { background: #0d1117; border: 3px solid var(--line); box-shadow: 4px 4px 0 var(--line); padding: 8px; display: grid; gap: 8px; }
+.sim-stagewrap { position: relative; }
 .sim-canvas { width: 100%; height: auto; aspect-ratio: 16 / 9; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+.sim-overlay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(92%, 520px); background: rgba(13, 17, 23, 0.94); border: 2px solid #e05252; box-shadow: 4px 4px 0 #5a1f1f; padding: 12px 14px; color: #f2f3f4; display: grid; gap: 6px; }
+.sim-overlay p { font-size: 13px; line-height: 1.45; color: #e6e8ec; }
+.sim-ovtitle { font-family: 'Press Start 2P', var(--font-mono); font-size: 10px; color: #f07070; letter-spacing: 0.04em; }
 .sim-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: #c3c8ce; }
 .sim-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sim-legend i { display: inline-block; width: 10px; height: 10px; }

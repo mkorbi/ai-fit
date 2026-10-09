@@ -135,7 +135,7 @@ const Sim = (() => {
     }
     c.fillStyle = g.sessions.some((z) => z.active) && Math.floor(t * 4) % 2 ? '#3ddc84' : '#1e5e3a'; c.fillRect(x + w - 4, y - 3, 2, 2);
   }
-  function drawPerson(c, x, y, p, t) {
+  function drawPerson(c, x, y, p, t, blocked) {
     const hue = hueOf(p.id);
     const idle = p.state === 'idle';
     const skin = '#f1c27d', hair = `hsl(${hue} 40% 25%)`, body = idle ? `hsl(${hue} 30% 36%)` : `hsl(${hue} 65% 52%)`, legs = '#2b2f3a';
@@ -147,7 +147,8 @@ const Sim = (() => {
     c.fillStyle = body; c.fillRect(x + 1, y + 4, 4, 3); c.fillRect(x, y + 5, 6, 1);
     const stepf = Math.floor(t * 4 + p.id) % 2;
     c.fillStyle = legs; c.fillRect(x + 1, y + 7, 1, 2); c.fillRect(x + 4, y + 7 + (idle ? 0 : stepf), 1, 2 - (idle ? 0 : stepf));
-    if (p.state === 'waiting') { c.fillStyle = '#f2c14e'; c.fillRect(x + 2, y - 4, 2, 3); c.fillRect(x + 1, y - 5, 4, 1); }                 // hourglass-ish
+    if (p.state === 'waiting' && blocked) { c.fillStyle = '#e05252'; c.fillRect(x + 1, y - 5, 1, 1); c.fillRect(x + 4, y - 5, 1, 1); c.fillRect(x + 2, y - 4, 2, 1); c.fillRect(x + 1, y - 3, 1, 1); c.fillRect(x + 4, y - 3, 1, 1); }   // cannot be served
+    else if (p.state === 'waiting') { c.fillStyle = '#f2c14e'; c.fillRect(x + 2, y - 4, 2, 3); c.fillRect(x + 1, y - 5, 4, 1); }                 // hourglass-ish
     if (p.state === 'prefill') { c.fillStyle = '#263041'; c.fillRect(x - 1, y - 4, 8, 2); c.fillStyle = '#7fb0ea'; c.fillRect(x - 1, y - 4, Math.max(1, Math.round(8 * Math.min(1, p.progress))), 2); }
   }
   function drawScene(c, S, dots, t) {
@@ -168,7 +169,7 @@ const Sim = (() => {
       const cellW = Math.max(1, Math.min(4, Math.floor(200 / Math.max(1, S.host.capacity))));
       S.host.ids.slice(0, Math.floor(200 / cellW)).forEach((id, i) => { c.fillStyle = `hsl(${hueOf(id)} 45% 42%)`; c.fillRect(6 + i * cellW, 159, Math.max(1, cellW - 1), 6); });
     }
-    S.people.forEach((p, i) => drawPerson(c, 216 + (i % 8) * 12, 28 + Math.floor(i / 8) * 23, p, t));
+    S.people.forEach((p, i) => drawPerson(c, 216 + (i % 8) * 12, 28 + Math.floor(i / 8) * 23, p, t, S.blocked));
     for (const d of dots) { c.fillStyle = `hsl(${d.hue} 80% 70%)`; c.fillRect(Math.round(d.x), Math.round(d.y), 1, 1); }
   }
   function sceneModel() {
@@ -184,7 +185,7 @@ const Sim = (() => {
         sessions: here.map((id) => ({ user: id, frac: (r.kv.perSession / G) / mem, active: activeIds.includes(id) })), sharedFrac: r.S > 0 ? (r.kv.shared / G) / mem : 0 });
     }
     const host = { capacity: s.retention === 'host' ? r.hostSessions : 0, ids: s.retention === 'host' ? retainedIds : [] };
-    return { gpus, people: SIM.people.slice(0, 48), host, hiddenGpus: Math.max(0, total - 16), hiddenPeople: Math.max(0, s.users - 48) };
+    return { gpus, people: SIM.people.slice(0, 48), host, blocked: slots() === 0, hiddenGpus: Math.max(0, total - 16), hiddenPeople: Math.max(0, s.users - 48) };
   }
 
   /* ---------- DOM ---------- */
@@ -221,11 +222,11 @@ const Sim = (() => {
       el('div', { class: 'sim-board' },
         el('div', { class: 'sim-col', 'aria-label': 'Hardware and model' }, el('div', { class: 'sim-coltitle' }, 'Hardware & model'), KNOBS.filter(([k]) => ['hw', 'count', 'model', 'wPrec', 'kvPrec', 'spec'].includes(k)).map(knobRow)),
         el('div', { class: 'sim-center' },
-          el('div', { class: 'sim-stage' }, canvas, el('div', { class: 'sim-legend' },
+          el('div', { class: 'sim-stage' }, el('div', { class: 'sim-stagewrap' }, canvas, el('div', { class: 'sim-overlay', id: 'simOverlay', hidden: true })), el('div', { class: 'sim-legend' },
             el('span', null, el('i', { style: 'background:#2f5fd1' }), 'weights'), el('span', null, el('i', { style: 'background:#4b5563' }), 'runtime overhead'), el('span', null, el('i', { style: 'background:#232a36' }), 'headroom'),
             el('span', null, el('i', { style: 'background:hsl(94 70% 58%)' }), 'active person\'s KV cache'), el('span', null, el('i', { style: 'background:hsl(94 30% 30%)' }), 'parked in GPU memory'), el('span', null, el('i', { style: 'background:#e0b84a' }), 'shared prefix'),
             el('span', null, el('i', { style: 'background:#b43a3a' }), 'weights overflow'), el('span', null, el('i', { style: 'background:#1a2130;border:1px solid #9aa3ad' }), 'host RAM strip'),
-            el('span', null, el('i', { style: 'background:#f2c14e' }), 'waiting for a slot'), el('span', null, el('i', { style: 'background:#7fb0ea' }), 'waiting for the first token'),
+            el('span', null, el('i', { style: 'background:#f2c14e' }), 'waiting for a slot'), el('span', null, el('i', { style: 'background:#7fb0ea' }), 'waiting for the first token'), el('span', null, el('i', { style: 'background:#e05252' }), 'cannot be served'),
             el('span', { id: 'simHidden' }))),
           el('div', { class: 'sim-controls' },
             el('span', { class: 'sim-plabel' }, 'Speed'),
@@ -259,6 +260,12 @@ const Sim = (() => {
     const cls = { ok: 'good', memory: 'bad', speed: 'bad', weights: 'bad', context: 'bad', prefill: 'bad' }[ev.limit];
     const label = { ok: 'ROOM TO SPARE', memory: 'MEMORY-BOUND', speed: 'BANDWIDTH-BOUND', weights: 'DOES NOT LOAD', context: 'CONTEXT TOO LONG', prefill: 'PREFILL-BOUND' }[ev.limit];
     box.replaceChildren(el('div', { class: 'sim-limit ' + cls }, label), el('p', null, ev.explain));
+    const ov = root.querySelector('#simOverlay');
+    if (ov) {
+      const stop = ev.limit === 'weights' || ev.limit === 'context';
+      ov.hidden = !stop;
+      if (stop) ov.replaceChildren(el('div', { class: 'sim-ovtitle' }, label), el('p', null, ev.explain));
+    }
   }
   function barChart(title, items, current, fmtLabel, termKey) {
     const max = Math.max(1, ...items.map((i) => i.users));
