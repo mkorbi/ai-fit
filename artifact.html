@@ -200,11 +200,13 @@ dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .gmeta { font-size: 12.5px; margin-top: 2px; }
 
 /* simulator */
-.sim { display: grid; gap: 14px; max-width: 1180px; }
+.sim { display: grid; gap: 14px; max-width: 1240px; margin-inline: auto; width: 100%; }
 .sim-board { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
-@media (min-width: 900px) { .sim-board { grid-template-columns: 184px minmax(0, 1fr) 184px; } }
+@media (min-width: 900px) { .sim-board { grid-template-columns: 200px minmax(0, 1fr) 200px; } }
 .sim-col { display: grid; gap: 6px; align-content: start; }
-.sim-coltitle { font-family: 'Press Start 2P', var(--font-mono); font-size: 8px; color: var(--muted); letter-spacing: 0.04em; padding: 2px 0; }
+.sim-coltitle { font-family: 'Press Start 2P', var(--font-mono); font-size: 10px; line-height: 1.4; color: var(--ink); letter-spacing: 0.04em; padding: 8px 8px 7px; background: var(--surface-2); border: 2px solid var(--line); border-left: 4px solid var(--accent); }
+.sim-kslide { display: grid; gap: 4px; }
+.sim-range { width: 100%; accent-color: var(--accent); margin: 2px 0; }
 .sim-center { display: grid; gap: 10px; min-width: 0; }
 @media (max-width: 899px) { .sim-col { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
 .sim-title { font-size: 22px; }
