@@ -195,6 +195,13 @@ table.compat .sticky { position: sticky; left: 0; background: var(--surface); z-
 .tip-meta { display: grid; gap: 3px; font-size: 12px; color: var(--ink-2); }
 .tip-meta i, .gmeta i { font-style: normal; font-family: var(--font-display); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11px; color: var(--muted); }
 dl.glossary { margin: 0; display: grid; gap: 10px; }
+/* Method view: the method text beside the glossary on wide screens; the glossary scrolls on its own */
+.method-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (min-width: 1100px) {
+  .method-grid { grid-template-columns: minmax(0, 76ch) minmax(320px, 1fr); }
+  .method-grid > .panel.prose { max-width: none; }
+  .method-grid > .gloss-panel { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; scrollbar-width: thin; }
+}
 dl.glossary dt { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
 dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .gmeta { font-size: 12.5px; margin-top: 2px; }
@@ -410,7 +417,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
 
     <div class="view" data-mode="sim" id="viewSim" hidden></div>
 
-    <div class="view" data-mode="method" id="viewMethod" hidden>
+    <div class="view method-grid" data-mode="method" id="viewMethod" hidden>
       <section class="panel prose">
         <h2>How the numbers are made</h2>
         <p>Everything here is a roofline estimate. It is meant to get the order of magnitude and the trade-offs right (memory versus bandwidth versus compute versus network) before you rent or buy anything. Measure on the real stack before you commit; the assumptions panel lets you dial the model to what you measure.</p>
@@ -472,8 +479,8 @@ all-to-all / layer = 2 · latency + 3 bytes · tokens_per_rank · k · d_model �
         </ul>
         <p class="hint">Catalog figures come from vendor data sheets, cloud price pages and Hugging Face model configs, checked November 2026; entries marked ~ are announced or derived. Correct them in the catalog view if you have better numbers.</p>
       </section>
-      <section class="panel prose" style="margin-top:18px">
-        <h2>Glossary</h2>
+      <section class="panel prose gloss-panel" aria-labelledby="glossTitle">
+        <h2 id="glossTitle">Glossary</h2>
         <p>Every dotted term in the app has one of these behind it: hover, focus or tap the term for the short version.</p>
         <dl class="glossary" id="glossary"></dl>
       </section>
