@@ -162,7 +162,10 @@ const Sim = (() => {
     const stepf = Math.floor(t * 4 + p.id) % 2;
     c.fillStyle = legs; c.fillRect(x + 1, y + 7, 1, 2); c.fillRect(x + 4, y + 7 + (idle ? 0 : stepf), 1, 2 - (idle ? 0 : stepf));
     if (p.state === 'waiting' && blocked) { c.fillStyle = '#e05252'; c.fillRect(x + 1, y - 5, 1, 1); c.fillRect(x + 4, y - 5, 1, 1); c.fillRect(x + 2, y - 4, 2, 1); c.fillRect(x + 1, y - 3, 1, 1); c.fillRect(x + 4, y - 3, 1, 1); }   // cannot be served
-    else if (p.state === 'waiting') { c.fillStyle = '#f2c14e'; c.fillRect(x + 2, y - 4, 2, 3); c.fillRect(x + 1, y - 5, 4, 1); }                 // hourglass-ish
+    else if (p.state === 'waiting') {                                                                                                              // hourglass: queued for a slot
+      c.fillStyle = '#f2c14e'; c.fillRect(x + 1, y - 8, 4, 1); c.fillRect(x + 1, y - 4, 4, 1); c.fillRect(x + 1, y - 7, 1, 1); c.fillRect(x + 4, y - 7, 1, 1); c.fillRect(x + 2, y - 6, 2, 1); c.fillRect(x + 1, y - 5, 1, 1); c.fillRect(x + 4, y - 5, 1, 1);
+      c.fillStyle = '#fff1bf'; c.fillRect(x + 2, y - 7, 2, 1); c.fillRect(x + 2, y - 5, 2, 1);
+    }
     if (p.state === 'prefill') { c.fillStyle = '#263041'; c.fillRect(x - 1, y - 4, 8, 2); c.fillStyle = '#7fb0ea'; c.fillRect(x - 1, y - 4, Math.max(1, Math.round(8 * Math.min(1, p.progress))), 2); }
   }
   function drawScene(c, S, dots, t) {
@@ -243,6 +246,43 @@ const Sim = (() => {
     return el('div', { class: 'sim-knob' }, term(K.term, K.label),
       el('div', { class: 'sim-kctl' }, el('button', { class: 'pxbtn', type: 'button', 'aria-label': `${K.label}: previous`, onclick: () => set(-1) }, '◀'), show, el('button', { class: 'pxbtn', type: 'button', 'aria-label': `${K.label}: next`, onclick: () => set(1) }, '▶')));
   }
+  /* The key under the stage: every symbol is drawn with the same sprite code as the animation. */
+  function icon(draw, w, h) {
+    const c = el('canvas', { width: w, height: h, class: 'sim-icon', style: `width:${w * 3}px;height:${h * 3}px`, 'aria-hidden': 'true' });
+    const g = c.getContext ? c.getContext('2d') : null;
+    if (g) { g.fillStyle = '#131a24'; g.fillRect(0, 0, w, h); draw(g); }
+    return c;
+  }
+  const block = (color, hatch) => icon((g) => { for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { if (hatch && (i + j) % 2) continue; g.fillStyle = color; g.fillRect(1 + i * 2, 1 + j * 2, 2, 2); } }, 10, 10);
+  const person = (state, extra) => icon((g) => { drawPerson(g, 3, 8, Object.assign({ id: 2, progress: 0.55 }, { state }), 0, extra === 'blocked'); if (extra === 'dots') { g.fillStyle = `hsl(${hueOf(2)} 80% 70%)`; g.fillRect(5, 4, 1, 1); g.fillRect(7, 1, 1, 1); g.fillRect(4, 0, 1, 1); } }, 12, 18);
+  function stageKey() {
+    const item = (pic, title, text) => el('li', null, pic, el('div', null, el('b', null, title), ' ', text));
+    return el('div', { class: 'sim-key' },
+      el('section', null, el('h4', null, 'GPU rack'),
+        el('p', { class: 'sim-keyintro' }, 'Each tall box is one GPU. Its memory fills from the bottom up; the green light blinks while it is generating.'),
+        el('ul', null,
+          item(block('#2f5fd1'), 'Weights.', 'The model itself, loaded once.'),
+          item(block('#4b5563'), 'Runtime overhead.', 'Engine workspace, activations, CUDA graphs.'),
+          item(block(`hsl(${hueOf(2)} 70% 58%)`), 'KV cache of an active person.', 'The model\'s memory of that conversation; same colour as the person, grows with the context.'),
+          item(block(`hsl(${hueOf(2)} 30% 30%)`), 'Idle session kept on the GPU.', 'Only with "keep in GPU memory" between turns.'),
+          item(block('#e0b84a'), 'Shared prefix.', 'System prompt stored once and reused by everyone (prefix caching).'),
+          item(block('#232a36', true), 'Headroom.', 'Memory the engine leaves free.'),
+          item(block('#b43a3a'), 'Red box.', 'The weights do not fit on these GPUs.'))),
+      el('section', null, el('h4', null, 'Host RAM strip'),
+        el('p', { class: 'sim-keyintro' }, 'The bar under the rack is the servers\' ordinary CPU memory, which is much larger and cheaper than GPU memory.'),
+        el('ul', null,
+          item(icon((g) => { for (let i = 0; i < 5; i++) { g.fillStyle = `hsl(${hueOf(i * 3 + 1)} 45% 42%)`; g.fillRect(1 + i * 2, 2, 1, 6); } }, 12, 10), 'One tick per idle person.', 'When someone stops to think, their KV cache moves here so the GPU can serve others. On their next turn it is copied back, which is much faster than re-reading the whole conversation.'),
+          item(block('#1a2130'), 'Empty strip.', 'Idle sessions are evicted instead (or kept on the GPU), depending on "Between turns".'))),
+      el('section', null, el('h4', null, 'People'),
+        el('p', { class: 'sim-keyintro' }, 'Each figure is one person, or a group of people when the note below says so. Up to 48 are drawn.'),
+        el('ul', null,
+          item(person('idle'), 'Dim, standing still:', 'thinking or reading. No request in flight, uses no GPU time.'),
+          item(person('waiting'), 'Hourglass:', 'asked a question, but every KV-cache slot is taken. Waits in the queue until someone finishes.'),
+          item(person('prefill'), 'Blue bar:', 'request accepted, the GPUs are reading the prompt (prefill). When the bar is full the first token appears: this is the time to first token.'),
+          item(person('decode', 'dots'), 'Bright, bobbing, dots rising:', 'receiving the answer. Each dot is a handful of generated tokens (about 6); more dots means more tokens per second.'),
+          item(person('waiting', 'blocked'), 'Red cross:', 'cannot be served at all, because the model or a single session does not fit.'))),
+      el('p', { class: 'sim-keynote', id: 'simHidden' }));
+  }
   function renderPanel() {
     root.replaceChildren(
       el('div', { class: 'sim-head' }, el('h2', { class: 'sim-title' }, 'Serving simulator'),
@@ -251,12 +291,11 @@ const Sim = (() => {
       el('div', { class: 'sim-board' },
         el('section', { class: 'sim-col', 'aria-labelledby': 'simColHw' }, el('h3', { class: 'sim-coltitle', id: 'simColHw' }, 'Hardware & model'), KNOBS.filter(([k]) => ['hw', 'count', 'model', 'wPrec', 'kvPrec', 'spec'].includes(k)).map(knobRow)),
         el('div', { class: 'sim-center' },
-          el('div', { class: 'sim-stage' }, el('div', { class: 'sim-stagewrap' }, canvas, el('div', { class: 'sim-overlay', id: 'simOverlay', hidden: true })), el('div', { class: 'sim-legend' },
-            el('span', null, el('i', { style: 'background:#2f5fd1' }), 'weights'), el('span', null, el('i', { style: 'background:#4b5563' }), 'runtime overhead'), el('span', null, el('i', { style: 'background:#232a36' }), 'headroom'),
-            el('span', null, el('i', { style: 'background:hsl(94 70% 58%)' }), 'active person\'s KV cache'), el('span', null, el('i', { style: 'background:hsl(94 30% 30%)' }), 'parked in GPU memory'), el('span', null, el('i', { style: 'background:#e0b84a' }), 'shared prefix'),
-            el('span', null, el('i', { style: 'background:#b43a3a' }), 'weights overflow'), el('span', null, el('i', { style: 'background:#1a2130;border:1px solid #9aa3ad' }), 'host RAM strip'),
-            el('span', null, el('i', { style: 'background:#f2c14e' }), 'waiting for a slot'), el('span', null, el('i', { style: 'background:#7fb0ea' }), 'waiting for the first token'), el('span', null, el('i', { style: 'background:#e05252' }), 'cannot be served'),
-            el('span', { id: 'simHidden' }))),
+          el('div', { class: 'sim-stage' }, el('div', { class: 'sim-stagewrap' }, canvas,
+            el('span', { class: 'sim-area', style: 'left:1.6%;top:0.6%' }, 'GPU rack: memory of each GPU, filled from the bottom'),
+            el('span', { class: 'sim-area', style: 'left:66.2%;top:0.6%' }, 'People'),
+            el('span', { class: 'sim-area', style: 'left:1.6%;top:94%' }, 'Host RAM: idle sessions parked between turns'),
+            el('div', { class: 'sim-overlay', id: 'simOverlay', hidden: true })), stageKey()),
           el('div', { class: 'sim-controls' },
             el('span', { class: 'sim-plabel' }, 'Speed'),
             [1, 10, 60].map((v) => el('button', { class: 'pxbtn' + (SIM.speed === v ? ' on' : ''), type: 'button', 'data-speed': v, onclick: () => { SIM.speed = v; root.querySelectorAll('[data-speed]').forEach((b) => b.classList.toggle('on', +b.dataset.speed === v)); } }, v + '×')),
@@ -282,7 +321,9 @@ const Sim = (() => {
       chip('capacity: at once', r.fits && ev.ctxOK ? fmtNum(r.maxConc) : '0', '', 'concurrent'),
       chip('KV per person', fmtGB(r.kv.perSession), '', 'kv-per-session'), chip('KV pool', r.fits ? fmtGB(r.kvAvail * r.R) : '0', '', 'kv-pool'), chip('weights', fmtGB(r.W), '', 'weights-mem'),
       chip('layout', `${r.ep ? 'EP' : 'TP'} ${r.tp} × PP ${r.pp} × ${r.R}`, '', 'layout-col'), chip('price', r.price != null ? fmtMoney(r.price) + '/h' : '—', '', 'cost-hour'), chip('served turns', fmtNum(Math.round(SIM.served * k))));
-    const hid = root.querySelector('#simHidden'); if (hid) hid.textContent = (scene && scene.hiddenGpus ? `+${scene.hiddenGpus} GPUs not drawn` : '') + (s.users > AGENTS ? ` · each figure stands for ${fmtNum(k, k < 10 ? 1 : 0)} people; 48 of ${AGENTS} figures drawn` : s.users > 48 ? ` · ${s.users - 48} more people simulated but not drawn` : '');
+    const hid = root.querySelector('#simHidden');
+    if (hid) hid.textContent = [scene && scene.hiddenGpus ? `${scene.hiddenGpus} more GPUs work the same way but are not drawn.` : '',
+      s.users > AGENTS ? `Each figure stands for ${fmtNum(k, k < 10 ? 1 : 0)} people; 48 of the ${AGENTS} simulated figures are drawn.` : s.users > 48 ? `${s.users - 48} more people are simulated but not drawn.` : ''].filter(Boolean).join(' ');
   }
   function renderExplain() {
     const box = root.querySelector('#simExplain'); if (!box) return;
