@@ -402,6 +402,14 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
       <section class="panel prose">
         <h2>How the numbers are made</h2>
         <p>Everything here is a roofline estimate. It is meant to get the order of magnitude and the trade-offs right (memory versus bandwidth versus compute versus network) before you rent or buy anything. Measure on the real stack before you commit; the assumptions panel lets you dial the model to what you measure.</p>
+        <h3>In short</h3>
+        <p>Three things limit how many people one setup serves, and the planner reports whichever bites first:</p>
+        <ul>
+          <li><strong>Memory.</strong> The weights take a fixed slice of accelerator memory. Whatever is left holds the KV cache, the model's working memory of each conversation, which grows with every token of context. Free memory divided by one session's KV cache is the most sessions that can be in flight at once.</li>
+          <li><strong>Speed.</strong> Every generated token reads all active weights plus the KV cache of every request in the batch. The more requests share a batch, the slower each one gets. The batch stops growing when a user would drop below the tokens-per-second target.</li>
+          <li><strong>Prefill.</strong> Every new prompt must be read in before the first output token appears. That costs compute and slows down the requests that are already generating. Long prompts with many turns can saturate a replica long before memory runs out.</li>
+        </ul>
+        <p>Users are concurrent requests divided by the share of time each user has a request in flight. The sections below give the formulas.</p>
         <h3>Memory</h3>
         <p>Each accelerator may use <code>util</code> of its memory (vLLM's <code>gpu_memory_utilization</code>). The weights of one replica are split evenly over its TP × PP accelerators; a fixed runtime overhead plus a share of the weight shard is reserved on each. What remains is the KV cache pool of the replica:</p>
         <pre>pool = TP·PP · (mem·util − overhead) − weights
@@ -429,8 +437,12 @@ step   = (max(t_bw, t_comp) + t_comm) · (1 + bubble · (PP − 1) / PP)</pre>
           <li>Expert-parallel all-to-all traffic (treated like the tensor-parallel all-reduce), load imbalance across experts, and MoE kernels that run below the BF16 roofline.</li>
           <li>Quality effects of quantization or RoPE scaling; the tool only flags contexts beyond the native window.</li>
           <li>Vision encoders, tool-call overheads, and multi-LoRA serving.</li>
+          <li>Bursts. Concurrency is users × activity, an average. Real arrivals cluster, so leave headroom (roughly <code>+2·√concurrency</code> covers most peaks) or requests queue and time to first token grows.</li>
+          <li>The draft model's own cost in speculative decoding. Built-in multi-token-prediction heads (DeepSeek, Qwen3-Next, GLM, Nemotron) are close to free; a separate draft model is not.</li>
+          <li>Per-model 16-bit share. A fixed 2% of the weights is counted at 16 bits (embeddings, norms, output head). Small models with large vocabularies, and checkpoints that keep attention in BF16 (gpt-oss), use more than that, so their quantized footprint is slightly underestimated.</li>
+          <li>Input-token cost. Cost per million tokens counts output tokens only; prefill work shows up as fewer output tokens per second, not as a separate input price.</li>
         </ul>
-        <p class="hint">Catalog figures come from vendor data sheets and model cards as of mid-2026; entries marked ~ are announced or derived. Correct them in the catalog view if you have better numbers.</p>
+        <p class="hint">Catalog figures come from vendor data sheets, cloud price pages and Hugging Face model configs, checked November 2026; entries marked ~ are announced or derived. Correct them in the catalog view if you have better numbers.</p>
       </section>
       <section class="panel prose" style="margin-top:18px">
         <h2>Glossary</h2>
