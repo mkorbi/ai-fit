@@ -208,8 +208,8 @@
         if (a.native.includes(f) && !t[f]) issues.push(`${hw.name}: ${a.name} computes ${f.toUpperCase()} natively but the entry has no ${f.toUpperCase()} TFLOPS.`);
         if (!a.native.includes(f) && t[f]) issues.push(`${hw.name}: entry lists ${f.toUpperCase()} TFLOPS but ${a.name} has no native ${f.toUpperCase()} units.`);
       }
-      if (t.fp8 && t.fp16 && (t.fp8 < t.fp16 || t.fp8 > 2.4 * t.fp16)) issues.push(`${hw.name}: FP8 is ${(t.fp8 / t.fp16).toFixed(1)}× BF16; dense tensor-core ratios are 1× to 2× (a sparsity-inflated figure?).`);
-      if (t.fp4 && t.fp8 && (t.fp4 < t.fp8 || t.fp4 > 3.2 * t.fp8)) issues.push(`${hw.name}: FP4 is ${(t.fp4 / t.fp8).toFixed(1)}× FP8; expected 2× to 3× dense.`);
+      if (t.fp8 && t.fp16 && (t.fp8 < t.fp16 || t.fp8 > 4.5 * t.fp16)) issues.push(`${hw.name}: FP8 is ${(t.fp8 / t.fp16).toFixed(1)}× BF16; dense ratios run 1× to 2× on most parts and up to ~4.4× on Rubin (a sparsity-inflated figure?).`);
+      if (t.fp4 && t.fp8 && (t.fp4 < t.fp8 || t.fp4 > 4.2 * t.fp8)) issues.push(`${hw.name}: FP4 is ${(t.fp4 / t.fp8).toFixed(1)}× FP8; expected 2× to 3× dense (4× on GeForce, whose FP8 rate is quoted with FP32 accumulate).`);
     }
     return issues;
   }
