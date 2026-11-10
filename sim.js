@@ -257,7 +257,9 @@ const Sim = (() => {
   const person = (state, extra) => icon((g) => { drawPerson(g, 3, 8, Object.assign({ id: 2, progress: 0.55 }, { state }), 0, extra === 'blocked'); if (extra === 'dots') { g.fillStyle = `hsl(${hueOf(2)} 80% 70%)`; g.fillRect(5, 4, 1, 1); g.fillRect(7, 1, 1, 1); g.fillRect(4, 0, 1, 1); } }, 12, 18);
   function stageKey() {
     const item = (pic, title, text) => el('li', null, pic, el('div', null, el('b', null, title), ' ', text));
-    return el('div', { class: 'sim-key' },
+    const box = el('details', { class: 'sim-keybox', open: LS.get('cb.simLegend', true) },
+      el('summary', null, 'Legend'),
+      el('div', { class: 'sim-key' },
       el('section', null, el('h4', null, 'GPU rack'),
         el('p', { class: 'sim-keyintro' }, 'Each tall box is one GPU. Its memory fills from the bottom up; the green light blinks while it is generating.'),
         el('ul', null,
@@ -281,7 +283,9 @@ const Sim = (() => {
           item(person('prefill'), 'Blue bar:', 'request accepted, the GPUs are reading the prompt (prefill). When the bar is full the first token appears: this is the time to first token.'),
           item(person('decode', 'dots'), 'Bright, bobbing, dots rising:', 'receiving the answer. Each dot is a handful of generated tokens (about 6); more dots means more tokens per second.'),
           item(person('waiting', 'blocked'), 'Red cross:', 'cannot be served at all, because the model or a single session does not fit.'))),
-      el('p', { class: 'sim-keynote', id: 'simHidden' }));
+));
+    box.addEventListener('toggle', () => LS.set('cb.simLegend', box.open));
+    return [box, el('p', { class: 'sim-keynote', id: 'simHidden' })];
   }
   function renderPanel() {
     root.replaceChildren(
