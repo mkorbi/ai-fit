@@ -285,7 +285,7 @@ const Sim = (() => {
   function barChart(title, items, current, fmtLabel, termKey) {
     const max = Math.max(1, ...items.map((i) => i.users));
     const bars = items.map((i) => {
-      const hpx = i.users > 0 ? 8 + Math.round(52 * Math.log10(1 + i.users) / Math.log10(1 + max) / 4) * 4 : 2;
+      const hpx = i.users > 0 ? 12 + Math.round(100 * Math.log10(1 + i.users) / Math.log10(1 + max) / 4) * 4 : 2;
       return el('div', { class: 'sim-bar' + (i.v === current ? ' on' : ''), title: `${fmtLabel(i.v)}: ${fmtNum(i.users)} people (${fmtNum(i.conc)} at once)` },
         el('span', { class: 'sim-barv' }, fmtNum(i.users)), el('i', { style: `height:${hpx}px` }), el('span', { class: 'sim-barl' }, fmtLabel(i.v)));
     });
@@ -296,11 +296,11 @@ const Sim = (() => {
     const byCtx = sweep(s, 'ctx', CTX_STEPS), byHw = sweep(s, 'hw', HW_POOL), byModel = sweep(s, 'model', MODEL_POOL), byKv = sweep(s, 'kvPrec', ['bf16', 'fp8', 'int4']), byW = sweep(s, 'wPrec', ['bf16', 'fp8', 'int4', 'fp4']);
     box.replaceChildren(
       el('h3', null, 'How many people this setup serves if you change one thing'),
-      barChart('context per person', byCtx, s.ctx, (v) => fmtTok(v), 'ctx'),
+      el('div', { class: 'sim-charts' }, barChart('context per person', byCtx, s.ctx, (v) => fmtTok(v), 'ctx'),
       barChart(`GPU type (${s.count} of them)`, byHw, s.hw, (v) => hwById(v).name.replace(/ \d+ GB.*$/, '').replace('Instinct ', '').replace('GeForce ', '').replace(' Blackwell', ''), 'accelerator'),
       barChart('model', byModel, s.model, (v) => modelById(v).name.replace(/ \/.*$/, '').replace(/\(.*\)/, '').trim(), 'model'),
       barChart('KV cache precision', byKv, s.kvPrec, (v) => PREC[v], 'kv-prec'),
-      barChart('weight precision', byW, s.wPrec, (v) => PREC[v], 'w-prec'));
+      barChart('weight precision', byW, s.wPrec, (v) => PREC[v], 'w-prec')));
   }
 
   /* ---------- animation ---------- */
