@@ -252,7 +252,7 @@ const Sim = (() => {
       chip('capacity: people', r.fits && ev.ctxOK ? fmtNum(r.maxUsers) : '0', r.fits && r.maxUsers >= s.users ? 'good' : 'bad', 'users'),
       chip('capacity: at once', r.fits && ev.ctxOK ? fmtNum(r.maxConc) : '0', '', 'concurrent'),
       chip('KV per person', fmtGB(r.kv.perSession), '', 'kv-per-session'), chip('KV pool', r.fits ? fmtGB(r.kvAvail * r.R) : '0', '', 'kv-pool'), chip('weights', fmtGB(r.W), '', 'weights-mem'),
-      chip('layout', `TP ${r.tp} × PP ${r.pp} × ${r.R}`, '', 'layout-col'), chip('price', r.price != null ? fmtMoney(r.price) + '/h' : '—', '', 'cost-hour'), chip('served turns', fmtNum(SIM.served)));
+      chip('layout', `${r.ep ? 'EP' : 'TP'} ${r.tp} × PP ${r.pp} × ${r.R}`, '', 'layout-col'), chip('price', r.price != null ? fmtMoney(r.price) + '/h' : '—', '', 'cost-hour'), chip('served turns', fmtNum(SIM.served)));
     const hid = root.querySelector('#simHidden'); if (hid) hid.textContent = (scene && scene.hiddenGpus ? `+${scene.hiddenGpus} GPUs not drawn` : '') + (s.users > 48 ? ` · ${Math.min(s.users, 240) - 48} more people simulated but not drawn` : '');
   }
   function renderExplain() {
