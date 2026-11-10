@@ -83,12 +83,12 @@
   const ACTIVITY = { chat: 10, assist: 25, agents: 60, batch: 100 };
   const DEFAULTS = {
     mode: 'forward', hw: 'h100-sxm', count: 8, nodeGpus: 8, link: 'auto', net: 'ib3200', hostRam: 1024,
-    model: 'llama-3.3-70b', wPrec: 'bf16', kvPrec: 'fp8', engine: 'vllm', par: 'auto', tp: 8, pp: 1, reps: 1, dpAttn: false,
-    users: 50, activityPreset: 'assist', activity: 25, ctx: 131072, prefix: 2048, newPrompt: 1000, output: 500, retention: 'host', target: 20, ttftMax: 30,
+    model: 'llama-3.3-70b', wPrec: 'bf16', kvPrec: 'fp8', engine: 'vllm', par: 'auto', tp: 8, pp: 1, reps: 1, dpAttn: false, ep: 'auto',
+    users: 50, activityPreset: 'assist', activity: 25, peakZ: 1.65, ctx: 131072, prefix: 2048, newPrompt: 1000, output: 500, retention: 'host', target: 20, ttftMax: 30,
     prefixCache: true, spec: false, specK: 4, specAlpha: 70, pd: false, allowCrossTp: false,
     candidates: ['h100-sxm', 'h200-sxm', 'b200', 'b300', 'gb200', 'mi300x', 'mi325x', 'mi355x', 'l40s', 'rtx-pro-6000', 'a100-sxm-80', 'rtx-4090'],
     compatCtx: 32768,
-    adv: { util: 90, overheadGB: 1.5, overheadFrac: 4, bwEff: 75, mfu: 50, frag: 4, ppBubble: 10, collEff: 70, hostRestoreGBs: 20 },
+    adv: { util: 90, overheadGB: 1.5, overheadFrac: 4, bwEff: 75, mfu: 50, frag: 4, ppBubble: 10, collEff: 70, hostRestoreGBs: 20, epImbalance: 1.2 },
   };
   let state = Object.assign({}, DEFAULTS, LS.get('cb.state', {}));
   state.adv = Object.assign({}, DEFAULTS.adv, state.adv || {});
@@ -103,10 +103,10 @@
       hw, model, wPrec: st.wPrec, kvPrec: st.kvPrec, engine: st.engine || 'none',
       count: Math.max(1, st.count | 0), nodeGpus: Math.max(1, st.nodeGpus | 0),
       link: st.link === 'auto' ? hw.link : st.link, net, hostRamGB: Math.max(0, +st.hostRam || 0),
-      dpAttention: !!st.dpAttn, allowCrossTp: !!st.allowCrossTp,
+      dpAttention: !!st.dpAttn, ep: st.ep || 'auto', allowCrossTp: !!st.allowCrossTp,
       tp: Math.max(1, st.tp | 0), pp: Math.max(1, st.pp | 0), replicas: Math.max(1, st.reps | 0),
       wl: {
-        users: Math.max(1, st.users | 0), activity: Math.min(1, Math.max(0.01, (+st.activity || 1) / 100)),
+        users: Math.max(1, st.users | 0), activity: Math.min(1, Math.max(0.01, (+st.activity || 1) / 100)), peakZ: Math.max(0, +st.peakZ || 0),
         ctx: Math.max(256, st.ctx | 0), prefix: Math.max(0, st.prefix | 0), newPrompt: Math.max(1, st.newPrompt | 0),
         output: Math.max(1, st.output | 0), retention: st.retention, target: Math.max(0.1, +st.target || 1), ttftMax: Math.max(0.1, +st.ttftMax || 30),
       },
@@ -114,26 +114,29 @@
       adv: {
         util: st.adv.util / 100, overheadGB: +st.adv.overheadGB, overheadFrac: st.adv.overheadFrac / 100, bwEff: st.adv.bwEff / 100,
         mfu: st.adv.mfu / 100, frag: st.adv.frag / 100, ppBubble: st.adv.ppBubble / 100, collEff: st.adv.collEff / 100,
-        hostRestoreGBs: +st.adv.hostRestoreGBs, specK: Math.max(1, st.specK | 0), specAlpha: Math.min(0.99, Math.max(0.05, st.specAlpha / 100)), engine: st.engine || 'none',
+        hostRestoreGBs: +st.adv.hostRestoreGBs, epImbalance: Math.max(1, +st.adv.epImbalance || 1), specK: Math.max(1, st.specK | 0), specAlpha: Math.min(0.99, Math.max(0.05, st.specAlpha / 100)), engine: st.engine || 'none',
       },
     };
   }
   function run(overrides) {
     const p = params(overrides);
     const st = Object.assign({}, state, overrides || {});
-    if (st.par === 'manual') return { best: E.evaluate(p), tried: [] };
+    if (st.par === 'manual') {   // a hand-set layout still lets 'auto' pick whether experts are split by expert or by slice
+      const tried = (p.ep === 'auto' && p.model.moe ? [false, true] : [E.epOn(p.ep)]).map((ep) => E.evaluate(Object.assign({}, p, { ep })));
+      return { best: tried.reduce((a, b) => (b.maxUsers > a.maxUsers ? b : a)), tried: [] };
+    }
     return E.autoConfig(p);
   }
 
   /* ---------- controls ---------- */
   const BIND = [
     ['hw', 'hw', 'str'], ['count', 'count', 'int'], ['nodeGpus', 'nodeGpus', 'int'], ['link', 'link', 'str'], ['net', 'net', 'str'], ['hostRam', 'hostRam', 'num'],
-    ['model', 'model', 'str'], ['engine', 'engine', 'str'], ['wPrec', 'wPrec', 'str'], ['kvPrec', 'kvPrec', 'str'], ['par', 'par', 'str'], ['tp', 'tp', 'int'], ['pp', 'pp', 'int'], ['reps', 'reps', 'int'], ['dpAttn', 'dpAttn', 'bool'],
-    ['users', 'users', 'int'], ['activityPreset', 'activityPreset', 'str'], ['activity', 'activity', 'num'], ['ctx', 'ctx', 'int'], ['prefix', 'prefix', 'int'], ['newPrompt', 'newPrompt', 'int'], ['output', 'output', 'int'], ['retention', 'retention', 'str'], ['target', 'target', 'num'], ['ttftMax', 'ttftMax', 'num'],
+    ['model', 'model', 'str'], ['engine', 'engine', 'str'], ['wPrec', 'wPrec', 'str'], ['kvPrec', 'kvPrec', 'str'], ['par', 'par', 'str'], ['tp', 'tp', 'int'], ['pp', 'pp', 'int'], ['reps', 'reps', 'int'], ['dpAttn', 'dpAttn', 'bool'], ['ep', 'ep', 'str'],
+    ['users', 'users', 'int'], ['activityPreset', 'activityPreset', 'str'], ['activity', 'activity', 'num'], ['peakZ', 'peakZ', 'num'], ['ctx', 'ctx', 'int'], ['prefix', 'prefix', 'int'], ['newPrompt', 'newPrompt', 'int'], ['output', 'output', 'int'], ['retention', 'retention', 'str'], ['target', 'target', 'num'], ['ttftMax', 'ttftMax', 'num'],
     ['prefixCache', 'prefixCache', 'bool'], ['spec', 'spec', 'bool'], ['specK', 'specK', 'int'], ['specAlpha', 'specAlpha', 'num'], ['pd', 'pd', 'bool'], ['allowCrossTp', 'allowCrossTp', 'bool'],
     ['compatCtx', 'compatCtx', 'int'],
     ['advUtil', 'adv.util', 'num'], ['advOverheadGB', 'adv.overheadGB', 'num'], ['advOverheadFrac', 'adv.overheadFrac', 'num'], ['advBwEff', 'adv.bwEff', 'num'], ['advMfu', 'adv.mfu', 'num'],
-    ['advFrag', 'adv.frag', 'num'], ['advPpBubble', 'adv.ppBubble', 'num'], ['advCollEff', 'adv.collEff', 'num'], ['advHostRestore', 'adv.hostRestoreGBs', 'num'],
+    ['advFrag', 'adv.frag', 'num'], ['advPpBubble', 'adv.ppBubble', 'num'], ['advCollEff', 'adv.collEff', 'num'], ['advHostRestore', 'adv.hostRestoreGBs', 'num'], ['advEpImb', 'adv.epImbalance', 'num'],
   ];
   const getPath = (obj, path) => path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
   const setPath = (obj, path, v) => { const ks = path.split('.'); let o = obj; for (const k of ks.slice(0, -1)) { if (o[k] == null) o[k] = {}; o = o[k]; } o[ks[ks.length - 1]] = v; };
@@ -208,8 +211,8 @@
         if (a.native.includes(f) && !t[f]) issues.push(`${hw.name}: ${a.name} computes ${f.toUpperCase()} natively but the entry has no ${f.toUpperCase()} TFLOPS.`);
         if (!a.native.includes(f) && t[f]) issues.push(`${hw.name}: entry lists ${f.toUpperCase()} TFLOPS but ${a.name} has no native ${f.toUpperCase()} units.`);
       }
-      if (t.fp8 && t.fp16 && (t.fp8 < t.fp16 || t.fp8 > 2.4 * t.fp16)) issues.push(`${hw.name}: FP8 is ${(t.fp8 / t.fp16).toFixed(1)}× BF16; dense tensor-core ratios are 1× to 2× (a sparsity-inflated figure?).`);
-      if (t.fp4 && t.fp8 && (t.fp4 < t.fp8 || t.fp4 > 3.2 * t.fp8)) issues.push(`${hw.name}: FP4 is ${(t.fp4 / t.fp8).toFixed(1)}× FP8; expected 2× to 3× dense.`);
+      if (t.fp8 && t.fp16 && (t.fp8 < t.fp16 || t.fp8 > 4.5 * t.fp16)) issues.push(`${hw.name}: FP8 is ${(t.fp8 / t.fp16).toFixed(1)}× BF16; dense ratios run 1× to 2× on most parts and up to ~4.4× on Rubin (a sparsity-inflated figure?).`);
+      if (t.fp4 && t.fp8 && (t.fp4 < t.fp8 || t.fp4 > 4.2 * t.fp8)) issues.push(`${hw.name}: FP4 is ${(t.fp4 / t.fp8).toFixed(1)}× FP8; expected 2× to 3× dense (4× on GeForce, whose FP8 rate is quoted with FP32 accumulate).`);
     }
     return issues;
   }
@@ -299,6 +302,9 @@
     }
   }
 
+  /* Layout as engines name it: TP n, or EP n with data-parallel attention, times the pipeline depth. */
+  const layoutName = (r) => `${r.ep ? 'EP' : 'TP'} ${r.tp}${r.dpa ? ' DP-attn' : ''} × PP ${r.pp}`;
+
   /* ----- forward ----- */
   function renderForward() {
     const p = params();
@@ -318,7 +324,7 @@
     // KPIs
     const a = r.at;
     const tiles = [
-      tile('Concurrent requests supported', r.fits ? fmtNum(r.maxConc) : '0', r.fits ? `≈ ${fmtNum(r.maxUsers)} users at ${pct(wl.activity)} active · you asked for ${fmtNum(r.B)}` : 'model does not load', r.fits && r.maxConc >= r.B ? 'good' : 'bad', true, 'concurrent'),
+      tile('Concurrent requests supported', r.fits ? fmtNum(r.maxConc) : '0', r.fits ? `≈ ${fmtNum(r.maxUsers)} users at ${pct(wl.activity)} active · you need ${fmtNum(r.B)}${wl.peakZ ? ' at peak' : ''}` : 'model does not load', r.fits && r.maxConc >= r.B ? 'good' : 'bad', true, 'concurrent'),
       tile('Context per session at your load', r.fits ? fmtTok(r.maxCtxAtLoad) : '—', `${fmtNum(r.sessionsPerRep)} sessions resident per replica · model max ${fmtTok(model.maxCtx)}`, r.maxCtxAtLoad >= wl.ctx ? 'good' : 'bad', false, 'ctx-at-load'),
       tile('Speed per user', a ? fmtTokS(a.perUser) + ' tok/s' : '—', a ? `target ≥ ${wl.target} · ${fmtTime(a.itl)} between tokens` : '', a && a.perUser >= wl.target && !a.saturated ? 'good' : 'bad', false, 'speed-per-user'),
       tile('Aggregate throughput', a ? fmtNum(r.aggTotal) + ' tok/s' : '—', r.costPerMTok != null ? `${fmtMoney(r.costPerMTok)} per 1M output tokens at ~${fmtMoney(r.price, 0)}/h` : (r.kW ? `${fmtNum(r.kW, 1)} kW of accelerators` : ''), null, false, 'aggregate'),
@@ -341,7 +347,7 @@
     const wl = p.wl, model = r.model, layout = `${r.total}× ${r.hw.name}`;
     const who = `${fmtNum(wl.users)} users (${fmtNum(r.B)} concurrent at ${pct(wl.activity)} active)`;
     if (!r.fits) {
-      const mg = E.minGpus(r.hw, model, p.wPrec, p.kvPrec, Math.min(wl.ctx, 32768), p.adv);
+      const mg = E.minGpus(r.hw, model, p.wPrec, p.kvPrec, Math.min(wl.ctx, 32768), p.adv, p.dpAttention);
       return [
         h('strong', null, `${model.name} in ${E.PREC_LABEL[p.wPrec]} does not load on ${layout}.`),
         h('p', null, `Weights take ${fmtGB(r.W)}; ${r.G} accelerators offer ${fmtGB(Math.max(0, r.G * r.capPerGpu))} after runtime overhead. `, mg ? `The smallest layout that loads it here is ${mg.G} accelerators (TP ${mg.tp} × PP ${mg.pp}) for one 32k session; lower the weight precision or pick bigger memory.` : 'No layout up to 64-way tensor × 16-stage pipeline parallelism loads it on this hardware.'),
@@ -374,22 +380,22 @@
   }
   function configBody(r, p, tried) {
     const hw = r.hw, mem = hw.mem * 1e9;
-    const wPer = r.W / r.G, kvPer = Math.max(0, r.kvAvailRaw / r.G), ovh = r.overhead, head = mem * (1 - p.adv.util);
+    const wPer = r.wPerGpu, kvPer = Math.max(0, r.kvAvailRaw / r.G), ovh = r.overhead, head = mem * (1 - p.adv.util);
     const segs = [['Weights', wPer, 'var(--s1)', 'weights-mem'], ['KV cache pool', kvPer, 'var(--s3)', 'kv-pool'], ['Runtime overhead', ovh, 'var(--muted)', 'overhead'], ['Headroom (unused by the engine)', head, 'var(--line)', 'headroom']];
     const bar = h('div', { class: 'membar', role: 'img', 'aria-label': `Memory per accelerator: weights ${fmtGB(wPer)}, KV cache ${fmtGB(kvPer)}, overhead ${fmtGB(ovh)}, headroom ${fmtGB(head)}` });
     for (const [name, val, color] of segs) if (val > 0) bar.append(h('div', { class: 'seg', style: `flex:${val};background:${color}`, title: `${name}: ${fmtGB(val)}` }));
     const key = h('ul', { class: 'key' }, segs.map(([name, val, color, term]) => h('li', null, h('i', { style: `background:${color}` }), h('span', { class: 't' }, T(term, name)), h('b', null, fmtGB(Math.max(0, val))))));
-    const layoutTxt = `TP ${r.tp} × PP ${r.pp} × ${plural(r.R, 'replica')} = ${r.total} accelerators on ${plural(r.nodes, 'node')}` + (r.count - r.total > 0 ? `, ${r.count - r.total} idle` : '') + (r.pdTotal ? `, plus ${r.pdTotal} in a prefill pool` : '');
+    const layoutTxt = `${layoutName(r)} × ${plural(r.R, 'replica')} = ${r.total} accelerators on ${plural(r.nodes, 'node')}` + (r.count - r.total > 0 ? `, ${r.count - r.total} idle` : '') + (r.pdTotal ? `, plus ${r.pdTotal} in a prefill pool` : '');
     const out = [
-      h('p', { class: 'lead' }, T('tp', 'TP'), ` ${r.tp} × `, T('pp', 'PP'), ` ${r.pp} × `, T('replicas', plural(r.R, 'replica')), layoutTxt.slice(layoutTxt.indexOf(' ='))),
-      h('p', { class: 'hint' }, `Per accelerator (${hw.mem} GB): ${fmtGB(wPer)} weights, ${fmtGB(kvPer)} KV cache = ${fmtTok(kvPer / Math.max(1, E.kvPerTokenFull(r.model, p.kvPrec) / r.kvRepl))} tokens${r.kvRepl > 1 ? ` (KV replicated ${r.kvRepl}×)` : ''}. ${r.S > 0 ? `Shared prefix of ${fmtTok(r.S)} tokens stored once per replica (${fmtGB(r.kv.shared)}).` : ''}`),
+      h('p', { class: 'lead' }, r.ep ? T('ep', 'EP') : T('tp', 'TP'), ` ${r.tp}${r.dpa ? ' (attention data-parallel)' : ''} × `, T('pp', 'PP'), ` ${r.pp} × `, T('replicas', plural(r.R, 'replica')), layoutTxt.slice(layoutTxt.indexOf(' ='))),
+      h('p', { class: 'hint' }, `Per accelerator (${hw.mem} GB): ${fmtGB(wPer)} weights${r.dpa ? ` (dense part copied to every rank)` : ''}, ${fmtGB(kvPer)} KV cache = ${fmtTok(kvPer / Math.max(1, E.kvPerTokenFull(r.model, p.kvPrec) / r.kvRepl))} tokens${r.kvRepl > 1 ? ` (KV replicated ${r.kvRepl}×)` : ''}. ${r.S > 0 ? `Shared prefix of ${fmtTok(r.S)} tokens stored once per replica (${fmtGB(r.kv.shared)}).` : ''}`),
       bar, key,
     ];
     if (tried && tried.length > 1) {
       const rows = tried.slice().sort((x, y) => (y.maxUsers - x.maxUsers) || ((y.at ? y.at.perUser : 0) - (x.at ? x.at.perUser : 0))).slice(0, 5);
       out.push(h('h4', null, 'Layouts considered'), table(
         [{ t: 'Layout', k: 'layout-col' }, { t: 'Concurrent', k: 'concurrent' }, 'Users', { t: 'tok/s per user', k: 'speed-per-user' }, { t: 'Context at load', k: 'ctx-at-load' }, 'Idle'],
-        rows.map((t) => [`TP ${t.tp} × PP ${t.pp} × ${t.R}` + (t === r ? ' ◂' : ''), t.fits ? fmtNum(t.maxConc) : 'no fit', t.fits ? fmtNum(t.maxUsers) : '—', t.at ? fmtTokS(t.at.perUser) : '—', t.fits ? fmtTok(t.maxCtxAtLoad) : '—', fmtNum(t.count - t.total)]),
+        rows.map((t) => [`${layoutName(t)} × ${t.R}` + (t === r ? ' ◂' : ''), t.fits ? fmtNum(t.maxConc) : 'no fit', t.fits ? fmtNum(t.maxUsers) : '—', t.at ? fmtTokS(t.at.perUser) : '—', t.fits ? fmtTok(t.maxCtxAtLoad) : '—', fmtNum(t.count - t.total)]),
         { numeric: [1, 2, 3, 4, 5] }));
     }
     return out;
@@ -401,12 +407,12 @@
     const linkName = r.tpCross ? p.net.name : (LINKS[p.link] || LINKS.nvlink).name;
     const rows = [
       [T('decode-step', 'Decode step'), fmtTime(a.step), `${a.bound}-bound at ${fmtNum(r.bPerRep)} concurrent per replica`],
-      [T('mem-traffic', 'Memory traffic'), fmtTime(a.tBw), `${fmtGB(a.wRead)} of weights + ${fmtGB(a.kvRead)} of KV cache per step at ${fmtGB(eff)}/s effective`],
+      [T('mem-traffic', 'Memory traffic'), fmtTime(a.tBw), `${fmtGB(a.wRead)} of weights + ${fmtGB(a.kvRead)} of KV cache per step at ${fmtGB(eff)}/s effective${r.ep ? `; the busiest expert rank sets the pace` : ''}`],
       [T('compute', 'Compute'), fmtTime(a.tComp), `${r.pk.used} matmuls at ${pct(p.adv.mfu)} of ${fmtNum(r.pk.peak / 1e12)} TFLOPS × ${r.G}`],
-      [T('collectives', 'Collectives'), fmtTime(a.tComm), r.tp > 1 ? `${2 * r.model.layers} all-reduces per token over ${linkName}` : 'no tensor parallelism'],
+      [T('collectives', 'Collectives'), fmtTime(a.tComm), r.tp === 1 ? 'no tensor or expert parallelism' : r.dpa && r.ep ? `${2 * r.model.layers} all-to-alls per step (expert dispatch and combine) over ${linkName}` : `${(r.dpa ? 1 : 2) * r.model.layers} all-reduces per step over ${linkName}`],
       [T('prefill-share', 'Prefill share'), pct(a.f) + (a.saturated ? ' (saturated)' : ''), `${a.lambda.toFixed(2)} requests/s per replica, ${fmtTok(r.warmNew)} new tokens each${p.opt.pd ? ' (in the prefill pool)' : ', interleaved with decode'}`],
       [T('ttft', 'Warm turn TTFT'), fmtTime(r.ttftWarm), p.wl.retention === 'host' ? `includes ${fmtTime(r.restoreS)} to restore ${fmtGB(r.kv.perSession)} from host memory` : `${fmtTok(r.warmNew)} tokens prefilled`],
-      [T('ttft', 'Cold TTFT'), fmtTime(r.ttftCold), `${fmtTok(r.coldNew)} tokens prefilled on ${r.tp} accelerators`],
+      [T('ttft', 'Cold TTFT'), fmtTime(r.ttftCold), r.dpa ? `${fmtTok(r.coldNew)} tokens: attention on one rank, experts on ${r.tp}` : `${fmtTok(r.coldNew)} tokens prefilled on ${r.tp} accelerators`],
     ];
     return [table(['What', 'Time', 'Why'], rows, { numeric: [1] })];
   }
@@ -421,7 +427,7 @@
   function evalAt(p, r, overrides) {
     const q = Object.assign({}, p, overrides || {});
     if (overrides && overrides.wl) q.wl = Object.assign({}, p.wl, overrides.wl);
-    return E.evaluate(Object.assign(q, { tp: r.tp, pp: r.pp, replicas: r.R }));
+    return E.evaluate(Object.assign(q, { tp: r.tp, pp: r.pp, replicas: r.R, ep: r.ep }));
   }
   function variantLabel(p) {
     const hw = p.hw;
@@ -552,6 +558,7 @@
     if (!st.spec) add('Speculative decoding', { spec: true }, `Draft ${st.specK} tokens per step at ${st.specAlpha}% acceptance; helps when memory-bound`, 'spec');
     if (st.retention === 'gpu') add('Park idle sessions in host memory', { retention: 'host' }, 'GPU memory holds only in-flight requests; idle KV restores over PCIe', 'opt-host');
     if (st.retention === 'none') add('Keep idle sessions in host memory', { retention: 'host' }, 'Skips re-prefilling the whole conversation on every turn', 'opt-host');
+    if (model.moe && !(st.dpAttn && st.ep !== 'off')) add('Data-parallel attention + expert parallelism', { dpAttn: true, ep: 'auto' }, 'Each rank serves its own requests and holds whole experts: no KV replication, all-to-all instead of all-reduce, groups may span nodes; dense weights are copied to every rank', 'ep');
     if (!st.pd) add('Disaggregate prefill from decode', { pd: true }, 'A separate prefill pool keeps token speed steady; needs KV transfer over the network', 'pd');
     const combo = {};
     if (st.kvPrec === 'bf16') combo.kvPrec = 'fp8';
@@ -595,8 +602,8 @@
     labelPrecOptions(null);
     $('#precHint').replaceChildren(checkpointNode(model, p.wPrec));
     const list = allHardware().filter((hw) => state.candidates.includes(hw.id));
-    const B = Math.max(1, Math.round(p.wl.users * p.wl.activity));
-    $('#revIntro').textContent = `Smallest layout per accelerator type that serves ${fmtNum(p.wl.users)} users (${fmtNum(B)} concurrent at ${pct(p.wl.activity)} active) of ${model.name} at ${fmtTok(p.wl.ctx)} context with at least ${p.wl.target} tok/s each and a first token within ${fmtTime(p.wl.ttftMax)}. Session KV: ${fmtGB(E.kvAtCtx(model, p.kvPrec, p.wl.ctx))} in ${E.KV_LABEL[p.kvPrec]}; all sessions: ${fmtGB(E.kvAtCtx(model, p.kvPrec, p.wl.ctx) * (p.wl.retention === 'gpu' ? p.wl.users : B))}.`;
+    const B = E.concurrency(p.wl);
+    $('#revIntro').textContent = `Smallest layout per accelerator type that serves ${fmtNum(p.wl.users)} users (${fmtNum(B)} concurrent at ${pct(p.wl.activity)} active${p.wl.peakZ ? ', peaks included' : ''}) of ${model.name} at ${fmtTok(p.wl.ctx)} context with at least ${p.wl.target} tok/s each and a first token within ${fmtTime(p.wl.ttftMax)}. Session KV: ${fmtGB(E.kvAtCtx(model, p.kvPrec, p.wl.ctx))} in ${E.KV_LABEL[p.kvPrec]}; all sessions: ${fmtGB(E.kvAtCtx(model, p.kvPrec, p.wl.ctx) * (p.wl.retention === 'gpu' ? p.wl.users : B))}.`;
     if (!list.length) { $('#revSummary').replaceChildren(); $('#revTable').replaceChildren(h('p', { class: 'hint' }, 'Pick at least one candidate accelerator in the left rail.')); return; }
     const results = E.reverse(p, list);
     const feasible = results.filter((r) => !r.infeasible);
@@ -613,7 +620,7 @@
       ? { cls: 'muted', cells: [h('b', null, r.hw.name), '—', '—', h('span', { class: 'note' }, r.reason), '', '', '', '', '', '', ''] }
       : { cells: [
         h('div', null, h('b', null, r.hw.name), r.warnings.some((w) => w.level === 'warn') ? h('div', { class: 'note' }, r.warnings.filter((w) => w.level === 'warn').map((w) => w.text).join(' ')) : null),
-        h('b', null, fmtNum(r.gpusUsed)), fmtNum(r.nodes), `TP ${r.tp} × PP ${r.pp} × ${r.R}${r.pdTotal ? ` + ${r.pdTotal} prefill` : ''}`,
+        h('b', null, fmtNum(r.gpusUsed)), fmtNum(r.nodes), `${layoutName(r)} × ${r.R}${r.pdTotal ? ` + ${r.pdTotal} prefill` : ''}`,
         fmtTokS(r.at.perUser), fmtTime(r.ttft), fmtGB(r.kvAvail * r.R), r.price != null ? fmtMoney(r.price, 0) : '—', r.costPerMTok != null ? fmtMoney(r.costPerMTok) : '—', r.kW != null ? fmtNum(r.kW, 1) : '—',
         h('button', { class: 'ghost', type: 'button', onclick: () => openInPlanner(r) }, 'Open'),
       ] });
@@ -625,7 +632,7 @@
     syncInputs(); scheduleRender(); window.scrollTo({ top: 0, behavior: 'smooth' });
   };
   function openInPlanner(r) {
-    Object.assign(state, { mode: 'forward', hw: r.hw.id, count: r.total, nodeGpus: r.hw.nodeGpus, link: 'auto', par: 'manual', tp: r.tp, pp: r.pp, reps: r.R });
+    Object.assign(state, { mode: 'forward', hw: r.hw.id, count: r.total, nodeGpus: r.hw.nodeGpus, link: 'auto', par: 'manual', tp: r.tp, pp: r.pp, reps: r.R, ep: r.ep ? 'on' : 'off', dpAttn: !!r.dpa || state.dpAttn });
     syncInputs(); scheduleRender(); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -651,7 +658,7 @@
       const m = E.norm(m0);
       return h('tr', null, h('td', { class: 't sticky' }, m.name), h('td', { class: 'n' }, fmtGB(E.kvPerTokenFull(m, p.kvPrec))), hws.map((hw) => {
         const unsupported = E.formatSupport(hw, p.wPrec, p.engine) === 'unsupported' || E.kvSupport(hw, p.kvPrec, p.engine) !== 'supported';
-        const mg = unsupported ? null : E.minGpus(hw, m, p.wPrec, p.kvPrec, ctx, p.adv);
+        const mg = unsupported ? null : E.minGpus(hw, m, p.wPrec, p.kvPrec, ctx, p.adv, p.dpAttention);
         const cls = !mg ? 'none' : mg.G === 1 ? 'one' : mg.G <= hw.nodeGpus ? 'node' : 'multi';
         return h('td', { class: 'n cell ' + cls, title: unsupported ? `${hw.name}: ${E.PREC_LABEL[p.wPrec]} weights are not loadable on ${(ARCHS[hw.arch] || {}).name || 'this generation'}` : mg ? `${hw.name}: ${mg.G} (TP ${mg.tp} × PP ${mg.pp})` : `${hw.name}: no layout up to 64 × 16 loads it` }, unsupported ? '✕' : mg ? String(mg.G) : '—');
       }));
@@ -660,13 +667,45 @@
   }
 
   /* ----- catalog ----- */
+  /* One table whose rows are clustered under collapsible group headers (vendor, model family), so the columns stay
+   * aligned across groups. Open groups are remembered per browser under `storeKey`. */
+  function groupedTable(cols, groups, opts, storeKey) {
+    const numeric = new Set((opts && opts.numeric) || []);
+    const open = new Set(LS.get(storeKey, []));
+    const save = () => LS.set(storeKey, [...open]);
+    const bodies = groups.map((g) => {
+      const btn = h('button', { type: 'button', class: 'grp-toggle', 'aria-expanded': String(open.has(g.key)) },
+        h('span', { class: 'grp-arrow', 'aria-hidden': 'true' }), h('b', null, g.label), h('span', { class: 'grp-count' }, String(g.rows.length)), h('span', { class: 'grp-meta' }, g.meta));
+      const rows = g.rows.map((row) => h('tr', { hidden: !open.has(g.key) }, row.map((c, i) => h('td', { class: numeric.has(i) ? 'n' : 't' }, c))));
+      const set = (on) => { btn.setAttribute('aria-expanded', String(on)); rows.forEach((r) => { r.hidden = !on; }); if (on) open.add(g.key); else open.delete(g.key); };
+      btn.addEventListener('click', () => { set(btn.getAttribute('aria-expanded') !== 'true'); save(); });
+      return { set, body: h('tbody', { class: 'grp' }, h('tr', { class: 'grp-head' }, h('th', { colspan: cols.length }, btn)), rows) };
+    });
+    const all = (on) => { bodies.forEach((b) => b.set(on)); save(); };
+    return h('div', null,
+      h('div', { class: 'row-btns grp-tools' }, h('button', { class: 'ghost', type: 'button', onclick: () => all(true) }, 'Expand all'), h('button', { class: 'ghost', type: 'button', onclick: () => all(false) }, 'Collapse all')),
+      h('div', { class: 'tw' }, h('table', { class: 'data grouped' },
+        h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: numeric.has(i) ? 'n' : null }, typeof c === 'string' ? c : T(c.k, c.t))))),
+        bodies.map((b) => b.body))));
+  }
+  /* Items grouped by key in order of first appearance. */
+  function clusterBy(items, keyOf) {
+    const map = new Map();
+    for (const it of items) { const k = keyOf(it) || 'Custom'; if (!map.has(k)) map.set(k, []); map.get(k).push(it); }
+    return [...map.entries()];
+  }
+  const span = (vals, fmt, unit) => { const lo = Math.min(...vals), hi = Math.max(...vals); return lo === hi ? `${fmt(lo)} ${unit}` : `${fmt(lo)}–${fmt(hi)} ${unit}`; };
   function renderCatalog() {
-    const hwRows = allHardware().map((hw) => [
-      h('b', null, hw.name + (hw.approx ? ' ~' : '')), hw.vendor, fmtNum(hw.mem), fmtNum(hw.bw), hw.tflops.fp16 ? fmtNum(hw.tflops.fp16) : '—', hw.tflops.fp8 ? fmtNum(hw.tflops.fp8) : '—', hw.tflops.fp4 ? fmtNum(hw.tflops.fp4) : '—',
+    const hwRow = (hw) => [
+      h('b', null, hw.name + (hw.approx ? ' ~' : '')), fmtNum(hw.mem), fmtNum(hw.bw), hw.tflops.fp16 ? fmtNum(hw.tflops.fp16) : '—', hw.tflops.fp8 ? fmtNum(hw.tflops.fp8) : '—', hw.tflops.fp4 ? fmtNum(hw.tflops.fp4) : '—',
       `${(LINKS[hw.link] || LINKS.none).name}${hw.linkBw ? ' ' + fmtNum(hw.linkBw) + ' GB/s' : ''}`, fmtNum(hw.nodeGpus), hw.tdp != null ? fmtNum(hw.tdp) : '—', hw.price != null ? fmtMoney(hw.price) : '—',
       ARCHS[hw.arch] ? ARCHS[hw.arch].name : '—', ARCHS[hw.arch] ? ARCHS[hw.arch].native.map((x) => x.toUpperCase()).join(' ') : '—', ARCHS[hw.arch] ? ARCHS[hw.arch].weightOnly.map((x) => x.toUpperCase()).join(' ') : '—',
-    ]);
-    $('#catHardware').replaceChildren(table([{ t: 'Accelerator', k: 'accelerator' }, 'Vendor', { t: 'Memory GB', k: 'mem-gb' }, { t: 'GB/s', k: 'bw' }, { t: 'BF16 TFLOPS', k: 'tflops-bf16' }, { t: 'FP8', k: 'tflops-fp8' }, { t: 'FP4', k: 'tflops-fp4' }, { t: 'Fabric', k: 'fabric' }, { t: 'Per node', k: 'per-node' }, { t: 'W', k: 'tdp' }, { t: '$/h', k: 'price' }, { t: 'Generation', k: 'generation' }, { t: 'Native formats', k: 'native-fmt' }, { t: 'Weight-only', k: 'weight-only' }], hwRows, { numeric: [2, 3, 4, 5, 6, 8, 9, 10] }));
+    ];
+    const hwGroups = clusterBy(allHardware(), (hw) => hw.vendor).map(([vendor, list]) => ({
+      key: vendor, label: vendor, rows: list.map(hwRow),
+      meta: `${span(list.map((x) => x.mem), fmtNum, 'GB')} · ${span(list.map((x) => x.bw), fmtNum, 'GB/s')}`,
+    }));
+    $('#catHardware').replaceChildren(groupedTable([{ t: 'Accelerator', k: 'accelerator' }, { t: 'Memory GB', k: 'mem-gb' }, { t: 'GB/s', k: 'bw' }, { t: 'BF16 TFLOPS', k: 'tflops-bf16' }, { t: 'FP8', k: 'tflops-fp8' }, { t: 'FP4', k: 'tflops-fp4' }, { t: 'Fabric', k: 'fabric' }, { t: 'Per node', k: 'per-node' }, { t: 'W', k: 'tdp' }, { t: '$/h', k: 'price' }, { t: 'Generation', k: 'generation' }, { t: 'Native formats', k: 'native-fmt' }, { t: 'Weight-only', k: 'weight-only' }], hwGroups, { numeric: [1, 2, 3, 4, 5, 7, 8, 9] }, 'cb.catHwOpen'));
     const fams = ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'gaudi', 'tpu', 'other'];
     const engRows = [];
     for (const [k, e] of Object.entries(ENGINES)) {
@@ -677,12 +716,16 @@
     $('#catEngines').replaceChildren(table(['Engine', 'Format'].concat(fams.map((f) => f.toUpperCase())), engRows), h('ul', { class: 'warnings', style: 'margin-top:10px' }, Object.values(ENGINES).filter((e) => e.docs).map((e) => h('li', null, h('b', null, `${e.name} (${e.version}, checked ${e.checked}${e.unverified ? ', not re-verified' : ''}): `), e.notes.join(' '), ' ', h('a', { href: e.docs.weights, target: '_blank', rel: 'noopener' }, 'source')))));
     const lint = catalogLint();
     $('#catLint').replaceChildren(...(lint.length ? [h('b', null, 'Consistency checks: '), h('ul', { class: 'warnings' }, lint.map((t) => h('li', null, h('span', { class: 'chip warn' }, 'check'), ' ', t)))] : [h('span', { class: 'chip good' }, 'ok'), " Every accelerator's TFLOPS columns agree with its chip generation."]));
-    const mRows = allModels().map((m0) => {
+    const mRow = (m0) => {
       const m = E.norm(m0);
       const arch = m.attn.map((l) => `${l.n}× ${l.type}${l.window ? ' ' + fmtTok(l.window) : ''}`).join(' + ') + (m.sparse ? ` · sparse top-${m.sparse.topk}` : '');
-      return [h('b', null, m.name + (m.approx ? ' ~' : '')), m.family, fmtNum(m.params, 1), m.moe ? fmtNum(m.active, 1) : '—', fmtNum(m.layers), `${m.nHeads} / ${m.attn.some((l) => l.type === 'mla') ? 'MLA' : m.nKv}`, fmtGB(E.kvPerTokenFull(m, 'bf16')), fmtGB(E.kvAtCtx(m, 'bf16', 1e6)), fmtTok(m.maxCtx) + (m.nativeCtx && m.nativeCtx < m.maxCtx ? ` (${fmtTok(m.nativeCtx)} native)` : ''), arch, m.nativePrec ? m.nativePrec.toUpperCase() : '—', m.hf ? h('a', { href: 'https://huggingface.co/' + m.hf, target: '_blank', rel: 'noopener' }, m.hf) : '—', m.variants ? h('span', null, ...Object.entries(m.variants).map(([k, r]) => h('span', { class: 'vlink' }, h('a', { href: 'https://huggingface.co/' + r, target: '_blank', rel: 'noopener', title: r }, k.toUpperCase()), ' '))) : '—'];
-    });
-    $('#catModels').replaceChildren(table([{ t: 'Model', k: 'model' }, 'Family', { t: 'Params B', k: 'params' }, { t: 'Active B', k: 'active' }, { t: 'Layers', k: 'layers' }, { t: 'Heads / KV heads', k: 'heads' }, { t: 'KV per token (BF16)', k: 'kv-per-token' }, { t: 'KV per 1M-token session', k: 'kv-1m' }, { t: 'Max context', k: 'max-ctx' }, { t: 'Attention layers', k: 'attn-layers' }, { t: 'Ships in', k: 'ships-in' }, { t: 'Verified against', k: 'verified' }, { t: 'Known checkpoints', k: 'checkpoints' }], mRows, { numeric: [2, 3, 4, 5, 6, 7, 8] }));
+      return [h('b', null, m.name + (m.approx ? ' ~' : '')), fmtNum(m.params, 1), m.moe ? fmtNum(m.active, 1) : '—', fmtNum(m.layers), `${m.nHeads} / ${m.attn.some((l) => l.type === 'mla') ? 'MLA' : m.nKv}`, fmtGB(E.kvPerTokenFull(m, 'bf16')), fmtGB(E.kvAtCtx(m, 'bf16', 1e6)), fmtTok(m.maxCtx) + (m.nativeCtx && m.nativeCtx < m.maxCtx ? ` (${fmtTok(m.nativeCtx)} native)` : ''), arch, m.nativePrec ? m.nativePrec.toUpperCase() : '—', m.hf ? h('a', { href: 'https://huggingface.co/' + m.hf, target: '_blank', rel: 'noopener' }, m.hf) : '—', m.variants ? h('span', null, ...Object.entries(m.variants).map(([k, r]) => h('span', { class: 'vlink' }, h('a', { href: 'https://huggingface.co/' + r, target: '_blank', rel: 'noopener', title: r }, k.toUpperCase()), ' '))) : '—'];
+    };
+    const mGroups = clusterBy(allModels(), (m) => m.family).map(([family, list]) => ({
+      key: family, label: family, rows: list.map(mRow),
+      meta: `${span(list.map((x) => x.params), (v) => fmtNum(v, v < 10 ? 1 : 0), 'B params')}${list.some((x) => x.moe) ? ` · ${list.filter((x) => x.moe).length} MoE` : ''}`,
+    }));
+    $('#catModels').replaceChildren(groupedTable([{ t: 'Model', k: 'model' }, { t: 'Params B', k: 'params' }, { t: 'Active B', k: 'active' }, { t: 'Layers', k: 'layers' }, { t: 'Heads / KV heads', k: 'heads' }, { t: 'KV per token (BF16)', k: 'kv-per-token' }, { t: 'KV per 1M-token session', k: 'kv-1m' }, { t: 'Max context', k: 'max-ctx' }, { t: 'Attention layers', k: 'attn-layers' }, { t: 'Ships in', k: 'ships-in' }, { t: 'Verified against', k: 'verified' }, { t: 'Known checkpoints', k: 'checkpoints' }], mGroups, { numeric: [1, 2, 3, 4, 5, 6, 7] }, 'cb.catModelOpen'));
   }
 
   /* ---------- boot ---------- */

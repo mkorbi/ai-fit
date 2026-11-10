@@ -9,7 +9,8 @@ network between nodes, then a model and a workload, and it tells you:
 - how much context each session can have at a given load,
 - tokens per second per user, aggregate throughput, time to first token, cost per million tokens and power,
 - which optimizations (KV cache and weight quantization, prefix caching, speculative decoding, session retention,
-  prefill/decode disaggregation, tensor vs pipeline layout) buy how much more room.
+  prefill/decode disaggregation, tensor vs pipeline layout, data-parallel attention and expert parallelism for
+  mixture-of-experts models, including expert-parallel groups across nodes) buy how much more room.
 
 The reverse direction works too: give it users, context, model and targets and it sizes the smallest layout per
 candidate accelerator, sorted by count and price.
@@ -58,6 +59,7 @@ sed '1,/^<body>$/d; /^<\/body>$/,$d' index.html > artifact.html
 | `tests/sim.js` | Simulator consistency test (presets load, people never grow with context) |
 | `tools/import-model.js` | Derives or verifies model entries from Hugging Face `config.json` and safetensors metadata; finds and verifies quantized checkpoints (node 18+, no dependencies) |
 | `tools/check-sources.js` | Verifies every accelerator's source page resolves and still shows its numbers |
+| `tests/ep.js` | Expert parallelism and data-parallel attention checks (memory copies, all-to-all, wide EP across nodes) |
 | `tests/anchors.js` | Calibration anchors: published fit statements and measured numbers the model must reproduce |
 | `engine.js` | The model: memory budget, KV geometry per attention type, roofline decode step, prefill cost, prefill/decode interleaving, speculative decoding, layout search, reverse search. Runs in node too (`require('./engine.js')`) |
 | `app.js` | The UI: inputs, KPI tiles, memory bar, timing table, capacity-frontier and speed charts, optimization ledger, reverse table, compatibility matrix, catalog editor |
@@ -138,3 +140,14 @@ against a benchmark of your real stack before buying or renting.
 Quick sanity anchors the model reproduces: Llama 3.3 70B in BF16 on 8× H100 SXM keeps roughly 1.3M KV tokens
 (about 9 sessions of 128k) and decodes at 25-30 tok/s per user; DeepSeek-V3 in FP8 on 8× H200 with data-parallel
 attention holds about 60 concurrent 64k sessions at 20 tok/s each.
+
+## Contributing
+
+Corrections and additions are welcome: open an [issue](https://github.com/mkorbi/ai-fit/issues) for a wrong number
+or a missing GPU or model (with a link to the source), use [Discussions](https://github.com/mkorbi/ai-fit/discussions)
+for questions and ideas, and send pull requests for code or catalog changes. Run `node tests/anchors.js`,
+`node tests/ep.js` and `node tests/sim.js` before opening one.
+
+## License
+
+MIT, see [LICENSE](LICENSE). © 2026 Max Körbächer.

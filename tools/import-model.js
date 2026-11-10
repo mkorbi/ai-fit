@@ -52,7 +52,8 @@ function mapConfig(cfg0) {
   let types = null;
   if (Array.isArray(c.layer_types)) types = c.layer_types;
   else if (Array.isArray(c.attn_type_list)) types = c.attn_type_list.map((t) => (t === 1 ? 'full_attention' : 'linear_attention'));
-  else if (typeof c.hybrid_override_pattern === 'string') types = [...c.hybrid_override_pattern].filter((ch) => ch !== '-').map((ch) => (ch === '*' ? 'full_attention' : 'linear_attention'));
+  // Nemotron-H: '*' attention, 'M' Mamba-2; '-' (MLP) and 'E' (MoE) blocks hold no sequence state
+  else if (typeof c.hybrid_override_pattern === 'string') types = [...c.hybrid_override_pattern].filter((ch) => ch === '*' || ch === 'M').map((ch) => (ch === '*' ? 'full_attention' : 'linear_attention'));
   const attn = [];
   const push = (t, n) => { if (n > 0) attn.push(Object.assign({ n }, t)); };
   if (mla) push({ type: 'mla', dc: c.kv_lora_rank, dr: c.qk_rope_head_dim }, layers);
@@ -82,6 +83,9 @@ function mapConfig(cfg0) {
   if (c.linear_num_value_heads) out.linear = { nHeads: c.linear_num_value_heads, dHead: c.linear_value_head_dim || c.linear_key_head_dim };
   out.attn = attn.sort((a, b) => (a.type === 'full' ? 1 : 0) - (b.type === 'full' ? 1 : 0));
   out.dtype = c.torch_dtype || c.dtype || null;
+  out.vocab = c.vocab_size ?? c.padded_vocab_size ?? null;
+  // configs that omit the flag inherit their class default: tied for Gemma 3 and Cohere, untied for the rest
+  out.tied = c.tie_word_embeddings ?? cfg0.tie_word_embeddings ?? ['gemma3', 'gemma3_text', 'cohere', 'cohere2'].includes(c.model_type);
   if (c.quantization_config) {
     const q = c.quantization_config;
     out.quant = [q.quant_method, q.fmt, q.bits ? q.bits + 'bit' : null, q.weight_block_size ? 'block ' + q.weight_block_size.join('×') : null, q.activation_scheme].filter(Boolean).join(' ');
@@ -96,6 +100,7 @@ function moeShape(c) {
   const layers = c.num_hidden_layers;
   let moeLayers = layers;
   if (Array.isArray(c.moe_layers)) moeLayers = c.moe_layers.length;
+  else if (typeof c.hybrid_override_pattern === 'string') moeLayers = [...c.hybrid_override_pattern].filter((ch) => ch === 'E').length;
   else {
     if (c.first_k_dense_replace) moeLayers -= c.first_k_dense_replace;
     if (c.interleave_moe_layer_step > 1) moeLayers = Math.floor(layers / c.interleave_moe_layer_step);
@@ -103,7 +108,9 @@ function moeShape(c) {
     if (Array.isArray(c.mlp_only_layers)) moeLayers -= c.mlp_only_layers.length;
   }
   const inter = c.moe_intermediate_size ?? c.intermediate_size;
-  return { experts: E_, active: k, moeLayers, perExpert: 3 * c.hidden_size * inter };
+  // Nemotron 3: squared-ReLU experts have two matrices (no gate), and Super/Ultra run them in a smaller latent width
+  const mats = (c.mlp_hidden_act ?? c.hidden_act) === 'relu2' ? 2 : 3;
+  return { experts: E_, active: k, moeLayers, perExpert: mats * (c.moe_latent_size ?? c.hidden_size) * inter };
 }
 function nativePrecision(info, mapped) {
   const params = info && info.safetensors && info.safetensors.parameters;
@@ -138,7 +145,7 @@ function toEntry(repo, up, info, cfg) {
   const entry = {
     id: repo.split('/')[1].toLowerCase(), family: repo.split('/')[0], name: repo.split('/')[1], hf: repo,
     params: total ? +(total / 1e9).toFixed(1) : null, active: active && shape ? +(active / 1e9).toFixed(1) : undefined,
-    layers: up.layers, dModel: up.dModel, nHeads: up.nHeads, nKv: up.nKv, dHead: up.dHead,
+    layers: up.layers, dModel: up.dModel, nHeads: up.nHeads, nKv: up.nKv, dHead: up.dHead, vocab: up.vocab || undefined, tied: up.tied || undefined,
     attn: attn.length === 1 && attn[0].type === 'full' ? undefined : attn,
     moe: up.moe, sparse: up.sparse, maxCtx: up.maxCtx, nativeCtx: up.nativeCtx, nativePrec: nativePrecision(info, up),
   };
@@ -164,6 +171,7 @@ function compare(entry, up, info, cfg, mirror) {
   check('moe.active', m.moe ? m.moe.active : '-', up.moe ? up.moe.active : '-');
   check('attention layers', fmtAttn(m.attn), fmtAttn(up.attn));
   check('sparse.topk', m.sparse ? m.sparse.topk : '-', up.sparse ? up.sparse.topk : '-');
+  check('vocab', m.vocab, up.vocab); check('tied', !!m.tied, up.tied);
   // context: catalog may extend beyond config with RoPE scaling when it documents the native size
   const ctxOk = m.maxCtx === up.maxCtx || (m.maxCtx > up.maxCtx && m.nativeCtx === up.maxCtx) || (up.nativeCtx && m.nativeCtx === up.nativeCtx && m.maxCtx === up.maxCtx);
   rows.push(['maxCtx', `${m.maxCtx}${m.nativeCtx ? ' (native ' + m.nativeCtx + ')' : ''}`, `${up.maxCtx}${up.nativeCtx ? ' (native ' + up.nativeCtx + ')' : ''}`, ctxOk ? 'ok' : 'MISMATCH']);

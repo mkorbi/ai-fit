@@ -12,7 +12,8 @@ const Engine = (() => {
   const ARCHS_ = typeof ARCHS !== 'undefined' ? ARCHS : require('./catalog.js').ARCHS;
   const ENGINES_ = typeof ENGINES !== 'undefined' ? ENGINES : require('./catalog.js').ENGINES;
   const FAMILY_ = typeof ENGINE_FAMILY !== 'undefined' ? ENGINE_FAMILY : require('./catalog.js').ENGINE_FAMILY;
-  const BYTES_W  = { bf16: 2, fp8: 1, int8: 1, int4: 0.52, fp4: 0.53 };   // bytes per parameter incl. group scales
+  const BYTES_W  = { bf16: 2, fp8: 1, int8: 1, int4: 0.52, fp4: 0.5625 }; // bytes per parameter incl. group scales
+  const BYTES_FP4 = { nv: 0.5625, mx: 0.53 };                              // NVFP4: 16-value blocks + FP8 scale; MXFP4: 32-value blocks + E8M0 scale
   const BYTES_KV = { bf16: 2, fp8: 1, int8: 1, int4: 0.56 };              // bytes per KV element
   const W_PRECS  = ['bf16', 'fp8', 'int8', 'int4', 'fp4'];
   const KV_PRECS = ['bf16', 'fp8', 'int4'];
@@ -32,14 +33,45 @@ const Engine = (() => {
     hostRestoreGBs: 20,  // GB/s per GPU when restoring a session's KV cache from host memory
     specK: 4,            // draft tokens per speculative step
     specAlpha: 0.70,     // per-token acceptance rate of the draft
-    prefillMaxLoad: 0.85 // above this share of GPU time on prefill the replica counts as saturated
+    prefillMaxLoad: 0.85, // above this share of GPU time on prefill the replica counts as saturated
+    epImbalance: 1.2     // expert parallelism: tokens on the busiest rank ÷ the mean (≈1.1 with expert load balancing, 1.3–1.5 without)
   };
 
   const norm = (m) => Object.assign({ active: m.params, attn: [{ n: m.layers, type: 'full' }] }, m);
   const isMla = (m) => m.attn.some((l) => l.type === 'mla');
 
-  function weightBytes(model, prec) {
-    return model.params * 1e9 * (0.98 * BYTES_W[prec] + 0.02 * 2);   // ~2% (embeddings, norms, head) stay 16-bit
+  /* Bytes per quantized parameter. FP4 is MXFP4 when the checkpoint ships in it or on AMD CDNA 4/5, NVFP4 otherwise. */
+  function bytesPerParam(model, prec, hw) {
+    if (prec !== 'fp4') return BYTES_W[prec];
+    const mx = /mxfp4/i.test(model.nativePrec || '') || (!!hw && (hw.arch === 'gfx950' || hw.arch === 'cdna5'));
+    return mx ? BYTES_FP4.mx : BYTES_FP4.nv;
+  }
+  /* Parameters every quantized checkpoint keeps in 16 bits: input embeddings and output head (once if tied), plus
+   * norms (~4 vectors per layer) and MoE routers. `keep16` overrides it for models that also keep attention in BF16 (gpt-oss). */
+  function keep16Params(model) {
+    const P = model.params * 1e9;
+    if (model.keep16 != null) return model.keep16 * 1e9;
+    if (!model.vocab) return 0.02 * P;
+    const small = model.layers * model.dModel * (4 + (model.moe ? model.moe.experts : 0));
+    return Math.min(P, model.vocab * model.dModel * (model.tied ? 1 : 2) + small);
+  }
+  function weightBytes(model, prec, hw) {
+    const P = model.params * 1e9, k = keep16Params(model);
+    return (P - k) * bytesPerParam(model, prec, hw) + k * 2;
+  }
+  /* Concurrent requests to plan for: the mean (users × activity) plus z standard deviations of how many users are
+   * active at once (binomial: each user is active a share `activity` of the time). z = 0 plans for the average. */
+  function concurrency(wl) {
+    const mean = wl.users * wl.activity, z = wl.peakZ || 0;
+    if (!z) return Math.max(1, Math.round(mean));
+    return Math.max(1, Math.min(wl.users, Math.ceil(mean + z * Math.sqrt(mean * (1 - wl.activity)))));
+  }
+  /* Most users whose planned concurrency fits `conc` request slots: the inverse of concurrency(). */
+  function usersFor(conc, wl) {
+    const c = (wl.peakZ || 0) * Math.sqrt(1 - wl.activity);
+    if (!c) return Math.floor(conc / wl.activity);
+    const x = (-c + Math.sqrt(c * c + 4 * conc)) / 2;
+    return Math.floor(x * x / wl.activity + 1e-9);
   }
   function expertSplit(model) {
     if (!model.moe) return { expert: 0, dense: model.params * 1e9 };
@@ -161,14 +193,20 @@ const Engine = (() => {
     const push = (level, text) => warnings.push({ level, text });
 
     // memory
-    const W = weightBytes(model, p.wPrec);
+    const W = weightBytes(model, p.wPrec, hw);
     const split = expertSplit(model);
-    const denseBytes = W * split.dense / (model.params * 1e9), expertBytes = W * split.expert / (model.params * 1e9);
-    const overhead = adv.overheadGB * 1e9 + adv.overheadFrac * (W / G);
+    const expertBytes = split.expert * bytesPerParam(model, p.wPrec, hw), denseBytes = Math.max(0, W - expertBytes);
+    // Data-parallel attention and expert parallelism exist only alongside MoE layers (vLLM, SGLang). With DP attention
+    // every rank runs attention for its own requests, so it holds a full copy of the dense weights of its stage.
+    const dpa = !!p.dpAttention && !!model.moe && tp > 1;
+    const ep = epOn(p.ep) && !!model.moe && tp > 1;
+    const imb = ep ? adv.epImbalance : 1;
+    const wPerGpu = dpa ? denseBytes / pp + expertBytes / G : W / G;
+    const overhead = adv.overheadGB * 1e9 + adv.overheadFrac * wPerGpu;
     const capPerGpu = hw.mem * 1e9 * adv.util - overhead;
-    const kvAvailRaw = G * capPerGpu - W;
+    const kvAvailRaw = G * (capPerGpu - wPerGpu);
     const mla = isMla(model);
-    const kvRepl = p.dpAttention ? 1 : (mla ? tp : Math.max(1, tp / model.nKv));
+    const kvRepl = dpa ? 1 : (mla ? tp : Math.max(1, tp / model.nKv));
     const kvAvail = kvAvailRaw > 0 ? kvAvailRaw * (1 - adv.frag) / kvRepl : 0;
     const C = Math.max(64, wl.ctx);
     const S = opt.prefixCache && wl.prefix > 0 ? Math.min(wl.prefix, C - 1) : 0;
@@ -180,7 +218,7 @@ const Engine = (() => {
     const fits = loadable && kvAvailRaw > 0 && maxSessions >= 1;
 
     // workload shape
-    const B = Math.max(1, Math.round(wl.users * wl.activity));
+    const B = concurrency(wl);
     const residentUsers = wl.retention === 'gpu' ? wl.users : B;
     const sessionsPerRep = Math.ceil(residentUsers / R);
     const bPerRep = Math.ceil(B / R);
@@ -201,28 +239,53 @@ const Engine = (() => {
       const bw = cross ? netBwPerGpu : linkBw;
       return count * (lat + (bw > 0 ? bytes / bw : 0));
     };
+    // All-to-all of expert parallelism: every rank sends each of its tokens' hidden states to the ranks holding that
+    // token's k experts (dispatch, FP8) and gets the results back (combine, BF16). When the group spans nodes, the share
+    // of peers on other nodes goes over the network while the rest uses the node fabric, in parallel.
+    const allToAll = (tokensPerRank, count) => {
+      const bytes = tokensPerRank * model.moe.active * model.dModel * (tp - 1) / tp;
+      const fOut = tpCross ? 1 - p.nodeGpus / tp : 0;
+      const move = (b) => Math.max(linkBw > 0 ? b * (1 - fOut) / linkBw : 0, fOut > 0 ? (netBwPerGpu > 0 ? b * fOut / netBwPerGpu : Infinity) : 0);
+      const lat = (tpCross ? p.net.latencyUs : link.latencyUs) * 1e-6;
+      return count * (2 * lat + move(bytes) + move(2 * bytes));
+    };
+    // Collectives of one layer pass over `tokens` tokens: tensor parallel all-reduces after attention and after the MLP;
+    // DP attention drops the first; DP attention with EP replaces the second by an all-to-all on the MoE layers.
+    const layerComm = (tokens, tokensPerRank) => {
+      if (tp === 1) return 0;
+      if (dpa && ep) return allToAll(tokensPerRank, model.layers);
+      return collective(tpCross, 2 * (tp - 1) / tp * tokens * model.dModel * 2, (dpa ? 1 : 2) * model.layers);
+    };
+    // Active parameters per token, split into the dense part and the routed experts (whose work EP spreads unevenly).
+    const expertActive = model.moe ? split.expert * model.moe.active / model.moe.experts : 0;
+    const denseActive = Math.max(0, model.active * 1e9 - expertActive);
 
     function decodeStep(b, spec) {
       const Cavg = Math.max(1, C - wl.output / 2);
       const kmul = spec ? adv.specK + 1 : 1;
-      const wRead = denseBytes + expertBytes * touched(model, b * kmul);
+      // bytes the busiest accelerator reads in one step (pipeline stages re-read their weights per micro-batch)
+      const t = touched(model, b * kmul), tRank = ep ? Math.min(1, t * imb) : t;
+      const denseRead = dpa ? denseBytes : denseBytes / tp, expertRead = expertBytes * tRank / tp;
+      const wRead = denseRead + expertRead;
       const kvRead = b * kvAtCtx(model, p.kvPrec, Cavg);
-      const tBw = (wRead + kvRead / pp) / (tp * hw.bw * 1e9 * adv.bwEff);
-      const flopsTok = 2 * model.active * 1e9 + attnFlopsPerTok(model, Cavg);
+      const tBw = (wRead + kvRead * kvRepl / (tp * pp)) / (hw.bw * 1e9 * adv.bwEff);
+      const flopsTok = 2 * denseActive + 2 * expertActive * imb + attnFlopsPerTok(model, Cavg);
       const tComp = b * kmul * flopsTok / (G * pk.peak * adv.mfu);
-      let tComm = 0;
-      if (tp > 1) tComm += collective(tpCross, 2 * (tp - 1) / tp * b * kmul * model.dModel * 2, 2 * model.layers);
+      let tComm = layerComm(b * kmul, b * kmul / tp);
       if (pp > 1) tComm += collective(ppCross, b * kmul * model.dModel * 2, pp - 1);
       const bubble = pp > 1 ? 1 + adv.ppBubble * (pp - 1) / pp : 1;
       const step = (Math.max(tBw, tComp) + tComm) * bubble;
       const bound = tComm > Math.max(tBw, tComp) ? 'communication' : (tBw >= tComp ? 'memory bandwidth' : 'compute');
-      return { tBw, tComp, tComm, step, bound, wRead, kvRead };
+      return { tBw, tComp, tComm, step, bound, wRead: wRead * tp, kvRead };
     }
     function prefill(newTok, cachedTok) {
       if (newTok <= 0) return { t: 0, flops: 0 };
-      const flops = newTok * 2 * model.active * 1e9 + prefillAttnFlops(model, cachedTok, cachedTok + newTok);
-      let t = flops / (tp * pk.peak * adv.mfu);
-      if (tp > 1) t += collective(tpCross, 2 * (tp - 1) / tp * newTok * model.dModel * 2, 2 * model.layers);
+      // with DP attention one request's attention and dense layers run on a single rank; its experts spread over all
+      const fDense = newTok * 2 * denseActive + prefillAttnFlops(model, cachedTok, cachedTok + newTok);
+      const fExpert = newTok * 2 * expertActive * imb;
+      const flops = fDense + newTok * 2 * expertActive;
+      let t = (fDense / (dpa ? 1 : tp) + fExpert / tp) / (pk.peak * adv.mfu);
+      t += layerComm(newTok, newTok);
       if (pp > 1) t += collective(ppCross, newTok * model.dModel * 2, pp - 1);
       return { t, flops };
     }
@@ -278,12 +341,12 @@ const Engine = (() => {
     const bSpeed = fits ? bSpeedSearch() : 0;
     let maxConc, maxUsers;
     if (wl.retention === 'gpu') {
-      const usersMem = maxSessions * R, usersSpeed = Math.floor(bSpeed * R / wl.activity);
+      const usersMem = maxSessions * R, usersSpeed = usersFor(bSpeed * R, wl);
       maxUsers = Math.min(usersMem, usersSpeed);
       maxConc = Math.floor(maxUsers * wl.activity);
     } else {
       maxConc = Math.min(maxSessions, bSpeed) * R;
-      maxUsers = Math.floor(maxConc / wl.activity);
+      maxUsers = usersFor(maxConc, wl);
     }
     const at = fits ? loadAt(Math.min(bPerRep, Math.max(1, maxSessions)), opt.spec) : null;
     const speedOK = !!at && memOK && ttftOK && at.perUser >= wl.target && !at.saturated;
@@ -319,9 +382,13 @@ const Engine = (() => {
       : `${sessionsPerRep} concurrent sessions per replica need ${fmtGB(kv.shared + sessionsPerRep * kv.perSession)} of KV cache; ${fmtGB(kvAvail)} available.`);
     if (fits && !ttftOK) push('crit', `Time to first token of ${fmtTime(ttft)} exceeds the ${fmtTime(ttftMax)} limit: ${fmtTok(warmNew)} tokens must be prefilled on ${tp} accelerator${tp > 1 ? 's' : ''} each turn.`);
     if (at && at.saturated) push('crit', `Prefill saturates the replica: prompts arrive faster than ${fmtTok(reqFlops / (2 * model.active * 1e9))}-token prefills can be computed. Add compute or cache more of the prompt.`);
-    if (tpCross) push('warn', p.net.gbps > 0 ? `Tensor parallel spans ${Math.ceil(tp / p.nodeGpus)} nodes; every layer's all-reduce crosses the network.` : 'Tensor parallel spans nodes but no inter-node network is configured.');
+    if (tpCross && p.net.gbps === 0) push('crit', `The ${dpa && ep ? 'expert-parallel group' : 'tensor-parallel group'} spans nodes but no inter-node network is configured.`);
+    else if (tpCross) push(dpa && ep ? 'info' : 'warn', dpa && ep ? `Expert parallelism spans ${Math.ceil(tp / p.nodeGpus)} nodes: each MoE layer's all-to-all sends ${Math.round((1 - p.nodeGpus / tp) * 100)}% of its traffic over the network.` : `Tensor parallel spans ${Math.ceil(tp / p.nodeGpus)} nodes; every layer's all-reduce crosses the network.`);
     if (ppCross && !tpCross && p.net.gbps === 0) push('crit', 'The layout needs more than one node but no inter-node network is configured.');
-    if (kvRepl > 1) push('warn', `KV cache is replicated ${kvRepl}× across tensor-parallel ranks (${mla ? 'MLA has a single latent head' : `${model.nKv} KV heads < TP ${tp}`}). Enable data-parallel attention or lower TP.`);
+    if (kvRepl > 1) push('warn', `KV cache is replicated ${kvRepl}× across tensor-parallel ranks (${mla ? 'MLA has a single latent head' : `${model.nKv} KV heads < TP ${tp}`}). ${model.moe ? 'Enable data-parallel attention or lower TP.' : 'Lower TP and add replicas instead.'}`);
+    if (p.dpAttention && !model.moe && tp > 1) push('info', 'Data-parallel attention applies to mixture-of-experts models only; this dense model runs plain tensor parallelism (use replicas for data parallelism).');
+    if (dpa) push('info', `Data-parallel attention keeps a full copy of the dense weights (attention, embeddings, shared experts: ${fmtGB(denseBytes / pp)}) on each of the ${tp} ranks.`);
+    if (ep) push('info', `Expert parallelism over ${tp} accelerators: ${model.moe.experts / tp} whole experts each; the busiest rank carries ${imb.toFixed(2)}× the mean expert load.`);
     if (pk.support === 'weight-only') push('info', `${PREC_LABEL[p.wPrec]} compute is not native on ${hw.name}: quantized weights save memory but matmuls run in BF16.`);
     const nk = nativeKey(model);
     if (nk && BYTES_W[nk] != null && BYTES_W[p.wPrec] > BYTES_W[nk]) push('info', `The checkpoint ships in ${model.nativePrec}; serving it in ${PREC_LABEL[p.wPrec]} upcasts the weights to ${(BYTES_W[p.wPrec] / BYTES_W[nk]).toFixed(1)}× the bytes without a quality gain.`);
@@ -332,8 +399,8 @@ const Engine = (() => {
     if (at && at.pdGpus > 0) push('info', `Prefill/decode disaggregation adds ${at.pdGpus} prefill accelerators per replica.`);
 
     return {
-      hw, model, tp, pp, R, G, total, nodes, gpusUsed, pdTotal, count: p.count,
-      W, denseBytes, expertBytes, overhead, capPerGpu, kvAvailRaw, kvAvail, kvRepl,
+      hw, model, tp, pp, R, G, total, nodes, gpusUsed, pdTotal, count: p.count, ep, dpa, imb,
+      W, denseBytes, expertBytes, wPerGpu, overhead, capPerGpu, kvAvailRaw, kvAvail, kvRepl,
       C, S, kv, maxSessions, fits, memOK, speedOK, B, bPerRep, sessionsPerRep, residentUsers,
       hostSessions, hostCoverage, idleUsers, bSpeed, bCap, maxConc, maxUsers, maxCtxAtLoad,
       at, ttft, ttftOK, ttftMax, ttftCold: cold.t, ttftWarm: warm.t + restoreS, restoreS, warmNew, coldNew, reqFlops, cap, pk,
@@ -343,16 +410,30 @@ const Engine = (() => {
   }
 
   /* ---------- layout search for a fixed accelerator count ---------- */
-  function layouts(model, count, nodeGpus, allowCrossTp) {
+  const epOn = (v) => v === true || v === 'on';
+  /* Expert-parallel settings to try: 'auto' tries both for MoE models. */
+  const epChoices = (model, v) => (!model.moe ? [false] : v === 'auto' ? [false, true] : [epOn(v)]);
+  /* Can a group of `tp` accelerators run this model? Attention heads must split evenly unless DP attention keeps
+   * attention whole on each rank; experts must split evenly under EP. Groups wider than a node need cross-node TP to
+   * be allowed, except DP attention with EP, whose only cross-node traffic is the MoE all-to-all. */
+  function groupOK(model, tp, nodeGpus, allowCrossTp, dpa, ep) {
+    const dpaOn = dpa && !!model.moe && tp > 1, epReal = ep && !!model.moe && tp > 1;
+    if (!dpaOn && model.nHeads % tp !== 0) return false;
+    if (epReal && model.moe.experts % tp !== 0) return false;
+    return tp <= nodeGpus || allowCrossTp || (dpaOn && epReal);
+  }
+  function layouts(model, count, nodeGpus, allowCrossTp, dpa, epSetting) {
     const out = [];
-    for (const tp of TP_CANDIDATES) {
-      if (tp > count) break;
-      if (model.nHeads % tp !== 0) continue;
-      if (tp > nodeGpus && !allowCrossTp) continue;
-      for (const pp of PP_CANDIDATES) {
-        const G = tp * pp;
-        if (G > count || pp > model.layers) break;
-        out.push({ tp, pp, replicas: Math.floor(count / G) });
+    for (const ep of epChoices(model, epSetting)) {
+      for (const tp of TP_CANDIDATES) {
+        if (tp > count) break;
+        if (ep && tp === 1) continue;
+        if (!groupOK(model, tp, nodeGpus, allowCrossTp, dpa, ep)) continue;
+        for (const pp of PP_CANDIDATES) {
+          const G = tp * pp;
+          if (G > count || pp > model.layers) break;
+          out.push({ tp, pp, replicas: Math.floor(count / G), ep });
+        }
       }
     }
     return out;
@@ -370,7 +451,7 @@ const Engine = (() => {
   function autoConfig(p) {
     const model = norm(p.model);
     let best = null; const tried = [];
-    for (const l of layouts(model, p.count, p.nodeGpus, p.allowCrossTp)) {
+    for (const l of layouts(model, p.count, p.nodeGpus, p.allowCrossTp, p.dpAttention, p.ep ?? 'auto')) {
       const r = evaluate(Object.assign({}, p, l));
       tried.push(r);
       if (better(r, best)) best = r;
@@ -379,20 +460,23 @@ const Engine = (() => {
   }
 
   /* smallest layout (tp × pp) on which the model loads with one session of `ctx` tokens */
-  function minGpus(hw, model0, wPrec, kvPrec, ctx, adv0) {
+  function minGpus(hw, model0, wPrec, kvPrec, ctx, adv0, dpAttention) {
     const model = norm(model0), adv = Object.assign({}, DEFAULT_ADV, adv0 || {});
     if (formatSupport(hw, wPrec, adv.engine) === 'unsupported' || kvSupport(hw, kvPrec, adv.engine) !== 'supported') return null;
-    const W = weightBytes(model, wPrec), need = kvAtCtx(model, kvPrec, ctx);
+    const W = weightBytes(model, wPrec, hw), need = kvAtCtx(model, kvPrec, ctx);
+    const expertB = expertSplit(model).expert * bytesPerParam(model, wPrec, hw), denseB = Math.max(0, W - expertB);
     const cands = [];
     for (const tp of TP_CANDIDATES) {
-      if (model.nHeads % tp !== 0 || tp > Math.max(hw.nodeGpus, 1)) continue;
+      if (tp > Math.max(hw.nodeGpus, 1) || !groupOK(model, tp, Infinity, true, dpAttention, false)) continue;
       for (const pp of PP_CANDIDATES) { if (pp > model.layers) break; cands.push({ G: tp * pp, tp, pp }); }
     }
     cands.sort((a, b) => a.G - b.G || b.tp - a.tp);
     for (const c of cands) {
-      const overhead = adv.overheadGB * 1e9 + adv.overheadFrac * (W / c.G);
-      const kvRepl = isMla(model) ? 1 : Math.max(1, c.tp / model.nKv);
-      const avail = (c.G * (hw.mem * 1e9 * adv.util - overhead) - W) * (1 - adv.frag) / kvRepl;
+      const dpa = !!dpAttention && !!model.moe && c.tp > 1;                                       // same rules as evaluate()
+      const wPer = dpa ? denseB / c.pp + expertB / c.G : W / c.G;
+      const overhead = adv.overheadGB * 1e9 + adv.overheadFrac * wPer;
+      const kvRepl = dpa ? 1 : (isMla(model) ? c.tp : Math.max(1, c.tp / model.nKv));
+      const avail = c.G * (hw.mem * 1e9 * adv.util - overhead - wPer) * (1 - adv.frag) / kvRepl;
       if (avail >= need) return c;
     }
     return null;
@@ -409,33 +493,29 @@ const Engine = (() => {
   }
   function reverse(p, hardwareList) {
     const model = norm(p.model), wl = p.wl;
-    const B = Math.max(1, Math.round(wl.users * wl.activity));
+    const B = concurrency(wl);
     const results = [];
     for (const hw of hardwareList) {
       const nodeGpus = hw.nodeGpus;
       let best = null, reason = 'Model does not fit on any layout up to 512 accelerators.';
       if (formatSupport(hw, p.wPrec, p.engine) === 'unsupported') { results.push({ hw, infeasible: true, reason: `${PREC_LABEL[p.wPrec]} weights are not loadable on this accelerator (${(ARCHS_[hw.arch] || {}).name || 'unknown generation'})${p.engine && p.engine !== 'none' ? ' with ' + ENGINES_[p.engine].name : ''}.` }); continue; }
       if (kvSupport(hw, p.kvPrec, p.engine) !== 'supported') { results.push({ hw, infeasible: true, reason: `${ENGINES_[p.engine].name} has no ${KV_LABEL[p.kvPrec]} KV cache on this accelerator.` }); continue; }
-      for (const tp of TP_CANDIDATES) {
-        if (model.nHeads % tp !== 0) continue;
-        if (tp > nodeGpus && !p.allowCrossTp) continue;
+      for (const ep of epChoices(model, p.ep ?? 'auto')) for (const tp of TP_CANDIDATES) {
+        if (ep && tp === 1) continue;
+        if (!groupOK(model, tp, nodeGpus, p.allowCrossTp, p.dpAttention, ep)) continue;
         for (const pp of PP_CANDIDATES) {
           const G = tp * pp;
           if (pp > model.layers || G > 512) break;
-          const r1 = evaluate(Object.assign({}, p, { hw, nodeGpus, link: hw.link, tp, pp, replicas: 1, count: G }));
+          const r1 = evaluate(Object.assign({}, p, { hw, nodeGpus, link: hw.link, tp, pp, ep, replicas: 1, count: G }));
           if (!r1.fits) continue;
           if (!r1.ttftOK) { reason = `Fits, but prefilling ${fmtTok(r1.warmNew)} tokens takes ${fmtTime(r1.ttft)} on TP ${tp}, over the ${fmtTime(r1.ttftMax)} limit.`; continue; }
-          let R;
-          if (wl.retention === 'gpu') {
-            const perRep = Math.min(r1.maxSessions, Math.floor(r1.bSpeed / wl.activity));
-            if (perRep < 1) { reason = `Fits, but ${fmtTok(wl.ctx)} sessions cannot reach ${wl.target} tok/s per user.`; continue; }
-            R = Math.ceil(wl.users / perRep);
-          } else {
-            const perRep = Math.min(r1.maxSessions, r1.bSpeed);
-            if (perRep < 1) { reason = `Fits, but a ${fmtTok(wl.ctx)}-token session cannot reach ${wl.target} tok/s per user (${r1.at ? r1.at.perUser.toFixed(1) : '?'} tok/s alone).`; continue; }
-            R = Math.ceil(B / perRep);
+          if (r1.bSpeed < 1) { reason = wl.retention === 'gpu' ? `Fits, but ${fmtTok(wl.ctx)} sessions cannot reach ${wl.target} tok/s per user.` : `Fits, but a ${fmtTok(wl.ctx)}-token session cannot reach ${wl.target} tok/s per user (${r1.at ? r1.at.perUser.toFixed(1) : '?'} tok/s alone).`; continue; }
+          // replicas for memory (resident sessions) and for speed (peak concurrency); rounding can leave one short, so step up
+          let R = Math.max(Math.ceil((wl.retention === 'gpu' ? wl.users : B) / r1.maxSessions), Math.ceil(B / r1.bSpeed)), r;
+          for (let tries = 0; tries < 4; tries++, R++) {
+            r = evaluate(Object.assign({}, p, { hw, nodeGpus, link: hw.link, tp, pp, ep, replicas: R, count: G * R }));
+            if (r.memOK && r.speedOK) break;
           }
-          const r = evaluate(Object.assign({}, p, { hw, nodeGpus, link: hw.link, tp, pp, replicas: R, count: G * R }));
           if (!(r.memOK && r.speedOK)) continue;
           if (betterRev(r, best)) best = r;
         }
@@ -474,8 +554,8 @@ const Engine = (() => {
   }
 
   return { BYTES_W, BYTES_KV, W_PRECS, KV_PRECS, PREC_LABEL, KV_LABEL, DEFAULT_ADV, TP_CANDIDATES, PP_CANDIDATES,
-    norm, isMla, weightBytes, expertSplit, touched, kvSplit, kvAtCtx, kvPerTokenFull, attnFlopsPerTok, prefillAttnFlops, peakFlops,
-    formatSupport, hwSupport, kvSupport, familyOf, evaluate, autoConfig, layouts, minGpus, reverse, fmtTok, fmtGB, fmtTime };
+    norm, isMla, weightBytes, bytesPerParam, keep16Params, concurrency, usersFor, expertSplit, touched, kvSplit, kvAtCtx, kvPerTokenFull, attnFlopsPerTok, prefillAttnFlops, peakFlops,
+    formatSupport, hwSupport, kvSupport, familyOf, evaluate, autoConfig, layouts, groupOK, epOn, minGpus, reverse, fmtTok, fmtGB, fmtTime };
 })();
 
 if (typeof module !== 'undefined') module.exports = Engine;

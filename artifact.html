@@ -124,6 +124,15 @@ table.data td { padding: 7px 8px; border-bottom: 1px solid var(--line-2); vertic
 table.data td.n, table.data th.n { text-align: right; font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.data td.t { font-family: var(--font-body); }
 table.data tr.base td { background: var(--surface-2); }
+table.grouped tr.grp-head th { padding: 0; border-bottom: 1px solid var(--line); text-transform: none; letter-spacing: 0; }
+.grp-toggle { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 9px 8px; cursor: pointer; background: var(--surface-2); color: var(--ink); font-family: var(--font-display); font-size: 14px; }
+.grp-toggle:hover { background: var(--accent-soft); }
+.grp-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.grp-arrow::before { content: '▸'; display: inline-block; width: 1em; color: var(--muted); }
+.grp-toggle[aria-expanded="true"] .grp-arrow::before { content: '▾'; }
+.grp-count { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+.grp-meta { font-family: var(--font-body); font-size: 12.5px; font-weight: 400; color: var(--muted); }
+.grp-tools { margin-bottom: 8px; }
 table.data tr.muted td { color: var(--muted); }
 table.data .note { font-size: 12px; color: var(--muted); font-weight: 400; max-width: 34ch; }
 table.data small.up { color: var(--good-text); font-family: var(--font-mono); font-size: 11px; }
@@ -179,16 +188,41 @@ table.compat .sticky { position: sticky; left: 0; background: var(--surface); z-
 .tip-meta { display: grid; gap: 3px; font-size: 12px; color: var(--ink-2); }
 .tip-meta i, .gmeta i { font-style: normal; font-family: var(--font-display); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11px; color: var(--muted); }
 dl.glossary { margin: 0; display: grid; gap: 10px; }
+/* Method view: the method text beside the glossary on wide screens; the glossary scrolls on its own */
+.method-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (min-width: 1100px) {
+  .method-grid { grid-template-columns: minmax(0, 76ch) minmax(320px, 1fr); }
+  .method-grid > .panel.prose { max-width: none; }
+  .method-grid > .gloss-panel { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; scrollbar-width: thin; }
+}
 dl.glossary dt { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
 dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .gmeta { font-size: 12.5px; margin-top: 2px; }
+/* About view */
+.about-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (min-width: 1000px) { .about-grid { grid-template-columns: minmax(0, 780px) minmax(320px, 400px); justify-content: center; } }
+.about-main.prose { max-width: none; }
+.about-lead { font-size: 17px; line-height: 1.55; color: var(--ink); }
+.about-side { display: grid; gap: 18px; }
+.about-side .prose { max-width: none; }
+.about-links { list-style: none; padding: 0 !important; }
+.about-repo { margin-top: 4px; }
+.about-btn { display: inline-block; padding: 9px 14px; background: var(--accent); color: var(--accent-ink); font-family: var(--font-display); font-weight: 600; text-decoration: none; border-radius: 3px; }
+.about-btn:hover { filter: brightness(1.08); }
+.site-foot { display: flex; flex-wrap: wrap; gap: 6px 22px; justify-content: center; padding: 28px 0 26px; margin-top: 30px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.site-foot a { color: inherit; }
+.site-foot a:hover { color: var(--accent); }
 
 /* simulator */
-.sim { display: grid; gap: 14px; max-width: 1180px; }
+.sim { display: grid; gap: 14px; max-width: 1240px; margin-inline: auto; width: 100%; }
 .sim-board { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
-@media (min-width: 900px) { .sim-board { grid-template-columns: 184px minmax(0, 1fr) 184px; } }
+@media (min-width: 900px) { .sim-board { grid-template-columns: 200px minmax(0, 1fr) 200px; } }
 .sim-col { display: grid; gap: 6px; align-content: start; }
-.sim-coltitle { font-family: 'Press Start 2P', var(--font-mono); font-size: 8px; color: var(--muted); letter-spacing: 0.04em; padding: 2px 0; }
+.sim-coltitle { font-family: 'Press Start 2P', var(--font-mono); font-size: 10px; line-height: 1.4; color: var(--ink); letter-spacing: 0.04em; padding: 8px 8px 7px; background: var(--surface-2); border: 2px solid var(--line); border-left: 4px solid var(--accent); }
+.sim-kslide { display: grid; gap: 4px; }
+.sim-select { width: 100%; min-width: 0; font-family: var(--font-mono); font-size: 12px; line-height: 1.3; color: var(--ink); background: var(--surface-2); border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); border-radius: 0; padding: 6px 6px; cursor: pointer; }
+.sim-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sim-range { width: 100%; accent-color: var(--accent); margin: 2px 0; }
 .sim-center { display: grid; gap: 10px; min-width: 0; }
 @media (max-width: 899px) { .sim-col { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
 .sim-title { font-size: 22px; }
@@ -203,13 +237,32 @@ dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .sim-overlay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(92%, 520px); background: rgba(13, 17, 23, 0.94); border: 2px solid #e05252; box-shadow: 4px 4px 0 #5a1f1f; padding: 12px 14px; color: #f2f3f4; display: grid; gap: 6px; }
 .sim-overlay p { font-size: 13px; line-height: 1.45; color: #e6e8ec; }
 .sim-ovtitle { font-family: 'Press Start 2P', var(--font-mono); font-size: 10px; color: #f07070; letter-spacing: 0.04em; }
-.sim-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: #c3c8ce; }
-.sim-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.sim-legend i { display: inline-block; width: 10px; height: 10px; }
-.sim-hud { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 6px; }
-.sim-chip { background: var(--surface); border: 2px solid var(--line); padding: 6px 8px; display: grid; gap: 4px; min-width: 0; }
-.sim-chip > span, .sim-chip > .term { font-size: 8px; color: var(--muted); letter-spacing: 0.02em; line-height: 1.5; }
-.sim-chip b { font-family: var(--font-mono); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.sim-area { position: absolute; font-family: 'Press Start 2P', var(--font-mono); font-size: 8px; line-height: 1; color: #9aa3ad; pointer-events: none; white-space: nowrap; }
+@media (max-width: 700px) { .sim-area { font-size: 6px; } }
+.sim-key { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px 22px; color: #c3c8ce; padding: 4px 2px 2px; }
+@media (min-width: 900px) { .sim-key { grid-template-columns: 1.15fr 0.85fr 1.2fr; } }
+.sim-key h4 { font-family: 'Press Start 2P', var(--font-mono); font-size: 9px; color: #f2f3f4; letter-spacing: 0.04em; margin-bottom: 6px; }
+.sim-keyintro { font-size: 12px; line-height: 1.45; color: #9aa3ad; margin-bottom: 8px; }
+.sim-key ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.sim-key li { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 8px; align-items: start; font-size: 12.5px; line-height: 1.45; }
+.sim-key li b { color: #f2f3f4; font-weight: 700; }
+.sim-icon { image-rendering: pixelated; image-rendering: crisp-edges; justify-self: center; }
+.sim-keybox { border-top: 1px solid #263041; padding-top: 6px; }
+.sim-keybox > summary { cursor: pointer; list-style: none; font-family: 'Press Start 2P', var(--font-mono); font-size: 10px; color: #f2f3f4; letter-spacing: 0.04em; padding: 6px 2px; display: flex; align-items: center; gap: 8px; }
+.sim-keybox > summary::-webkit-details-marker { display: none; }
+.sim-keybox > summary::before { content: ''; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 7px solid #c3c8ce; transition: transform 0.15s; }
+.sim-keybox[open] > summary::before { transform: rotate(90deg); }
+.sim-keybox > summary:hover { color: var(--accent); }
+.sim-keybox > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sim-keybox[open] > .sim-key { margin-top: 6px; }
+.sim-keynote { font-size: 12px; color: #9aa3ad; }
+.sim-keynote:empty { display: none; }
+.sim-hud { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (min-width: 700px) { .sim-hud { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1000px) { .sim-hud { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.sim-chip { background: var(--surface); border: 2px solid var(--line); padding: 12px 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.sim-chip > span, .sim-chip > .term { font-size: 9.5px; color: var(--muted); letter-spacing: 0.02em; line-height: 1.5; justify-self: start; }
+.sim-chip b { font-family: var(--font-mono); font-size: 21px; line-height: 1.2; font-weight: 600; overflow-wrap: anywhere; }
 .sim-chip.good b { color: var(--good-text); } .sim-chip.bad b { color: var(--crit-text); }
 .sim-explain { display: grid; gap: 8px; background: var(--surface); border: 2px solid var(--line); padding: 12px 14px; }
 .sim-explain p { max-width: 80ch; color: var(--ink-2); }
@@ -225,16 +278,18 @@ dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .pxbtn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .pxbtn.go { background: var(--good); color: #fff; border-color: var(--good-text); box-shadow: 3px 3px 0 var(--good-text); font-size: 11px; padding: 10px 14px; }
 .pxbtn.ghost { box-shadow: none; border-color: var(--line); color: var(--ink-2); }
-.sim-sweeps { display: grid; gap: 14px; background: var(--surface); border: 2px solid var(--line); padding: 12px 14px; }
-.sim-sweeps h3 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-.sim-chart { display: grid; gap: 6px; }
-.sim-ctitle { font-size: 9px; color: var(--ink-2); }
-.sim-bars { display: flex; align-items: flex-end; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
-.sim-bar { display: grid; justify-items: center; gap: 3px; min-width: 56px; }
-.sim-bar i { display: block; width: 24px; background: var(--s1); }
+.sim-sweeps { display: grid; gap: 14px; background: var(--surface); border: 2px solid var(--line); padding: 14px 16px 16px; }
+.sim-sweeps h3 { font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.sim-charts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 900px) { .sim-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sim-chart { display: grid; gap: 10px; align-content: start; background: var(--surface-2); border: 2px solid var(--line-2); padding: 12px 12px 10px; min-width: 0; }
+.sim-ctitle { font-size: 10px; line-height: 1.5; color: var(--ink); }
+.sim-bars { display: flex; align-items: flex-end; gap: 8px; overflow-x: auto; padding-bottom: 4px; min-height: 160px; }
+.sim-bar { display: grid; justify-items: center; align-content: end; gap: 5px; flex: 1 1 0; min-width: 52px; }
+.sim-bar i { display: block; width: min(100%, 36px); background: var(--s1); }
 .sim-bar.on i { background: var(--accent); }
-.sim-barv { font-size: 8px; color: var(--ink); }
-.sim-barl { font-size: 7px; color: var(--muted); text-align: center; max-width: 72px; line-height: 1.5; }
+.sim-barv { font-size: 9.5px; color: var(--ink); }
+.sim-barl { font-size: 8px; color: var(--muted); text-align: center; max-width: 92px; line-height: 1.6; min-height: 4.8em; }
 
 /* catalog & method */
 .vlink a { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; text-decoration: none; border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px; margin-right: 3px; }
@@ -259,6 +314,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
     <button class="tab" role="tab" data-mode="catalog" aria-selected="false" type="button">Catalog</button>
     <button class="tab" role="tab" data-mode="method" aria-selected="false" type="button">Method</button>
     <button class="tab" role="tab" data-mode="sim" aria-selected="false" type="button">Simulator</button>
+    <button class="tab" role="tab" data-mode="about" aria-selected="false" type="button">About</button>
   </nav>
 </header>
 
@@ -298,13 +354,15 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
         <label><span class="term" data-term="pp" tabindex="0">Pipeline (PP)</span><input id="pp" type="number" min="1" step="1"></label>
         <label><span class="term" data-term="replicas" tabindex="0">Replicas</span><input id="reps" type="number" min="1" step="1"></label>
       </div>
-      <div class="field"><label for="dpAttn"><span class="term" data-term="dp-attn" tabindex="0">Data-parallel attention (no KV replication across TP ranks)</span></label><input id="dpAttn" type="checkbox"></div>
+      <div class="field"><label for="dpAttn"><span class="term" data-term="dp-attn" tabindex="0">Data-parallel attention (MoE models: no KV replication, dense weights on every rank)</span></label><input id="dpAttn" type="checkbox"></div>
+      <div class="field"><label for="ep"><span class="term" data-term="ep" tabindex="0">Expert parallelism (MoE)</span></label><select id="ep"><option value="auto">Best for this workload</option><option value="on">On: whole experts per rank</option><option value="off">Off: every expert sliced by TP</option></select></div>
     </fieldset>
     <fieldset class="group" id="railWorkload">
       <legend>Workload</legend>
       <div class="field"><label for="users"><span class="term" data-term="users" tabindex="0">Users</span></label><input id="users" type="number" min="1" step="1"></div>
       <div class="field"><label for="activityPreset">Usage pattern</label><select id="activityPreset"><option value="chat">Chat: 10% of time active</option><option value="assist">Assistant: 25%</option><option value="agents">Coding agents: 60%</option><option value="batch">Batch / API: 100%</option><option value="custom">Custom</option></select></div>
       <div class="field"><label for="activity"><span class="term" data-term="activity" tabindex="0">Share of time a user has a request in flight (%)</span></label><input id="activity" type="number" min="1" max="100" step="1"></div>
+      <div class="field wide"><label for="peakZ"><span class="term" data-term="peak" tabindex="0">Plan for bursts</span></label><select id="peakZ"><option value="0">Average load only</option><option value="1.65">Peaks of 95% of the time</option><option value="2.33">Peaks of 99% of the time</option></select></div>
       <div class="field"><label for="ctx"><span class="term" data-term="ctx" tabindex="0">Context per session (tokens)</span></label><input id="ctx" type="number" min="1024" step="1024"></div>
       <div class="field wide"><input id="ctxRange" type="range" min="0" max="1200" step="1" aria-label="Context per session, logarithmic"></div>
       <div class="field"><label for="prefix"><span class="term" data-term="prefix" tabindex="0">Shared prefix (system prompt, shared docs)</span></label><input id="prefix" type="number" min="0" step="256"></div>
@@ -335,6 +393,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
       <div class="field"><label for="advCollEff"><span class="term" data-term="coll-eff" tabindex="0">Achieved link bandwidth in collectives (%)</span></label><input id="advCollEff" type="number" min="10" max="100" step="5"></div>
       <div class="field"><label for="advPpBubble"><span class="term" data-term="pp-bubble" tabindex="0">Pipeline bubble per extra stage (%)</span></label><input id="advPpBubble" type="number" min="0" step="1"></div>
       <div class="field"><label for="advHostRestore"><span class="term" data-term="host-restore" tabindex="0">Host-to-GPU restore (GB/s per GPU)</span></label><input id="advHostRestore" type="number" min="1" step="1"></div>
+      <div class="field"><label for="advEpImb"><span class="term" data-term="ep-imb" tabindex="0">Expert load imbalance (busiest rank ÷ mean)</span></label><input id="advEpImb" type="number" min="1" max="3" step="0.05"></div>
       <div class="row-btns"><button class="ghost" type="button" id="resetInputs">Reset every input</button></div>
     </details>
   </aside>
@@ -391,16 +450,66 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
 
     <div class="view" data-mode="sim" id="viewSim" hidden></div>
 
-    <div class="view" data-mode="method" id="viewMethod" hidden>
+    <div class="view about-grid" data-mode="about" id="viewAbout" hidden>
+      <section class="panel prose about-main" aria-labelledby="aboutTitle">
+        <h2 id="aboutTitle">About AI Fit</h2>
+        <p class="about-lead">Will this model fit on these GPUs? How many people can use it at once, with how much context, at what speed and cost? AI Fit answers those questions for open-weight models you host yourself, before you buy or rent anything.</p>
+        <h3>Why it exists</h3>
+        <p>The answer is spread over many places: GPU datasheets, cloud price pages, model configs on Hugging Face, the quantization tables of vLLM, SGLang and TensorRT-LLM, and a lot of rules of thumb. Each piece is easy to find; putting them together for your workload is not. AI Fit puts them into one model you can turn the knobs of, and shows its work: every formula is on the Method page, and every number in the catalog names its source.</p>
+        <h3>What it is good for</h3>
+        <ul>
+          <li><strong>Sizing.</strong> How many users and how much context a given set of GPUs serves, or the smallest setup for a given workload, with the cost per hour and per million tokens.</li>
+          <li><strong>Comparing.</strong> 59 accelerators from NVIDIA, AMD, Intel, Google, AWS, Apple and Tenstorrent, and 68 open-weight models, side by side.</li>
+          <li><strong>Checking what runs where.</strong> Which number formats each chip and serving engine supports, and which quantized checkpoints exist for each model.</li>
+          <li><strong>Seeing the trade-offs.</strong> Context against users against speed, and how much KV-cache quantization, prefix caching, speculative decoding, expert parallelism or parking idle sessions in host memory buys.</li>
+          <li><strong>Explaining it to others.</strong> The Simulator shows the same numbers as a rack filling up and a crowd waiting, for people who do not read formulas.</li>
+        </ul>
+        <p>It is a planning estimate, not a benchmark. Use it to get the order of magnitude and the trade-offs right, then measure on your own stack before you commit; the assumptions panel lets you match the model to what you measure.</p>
+        <h3>Privacy</h3>
+        <p>Everything runs in your browser. Your inputs and custom catalog entries are stored in this browser only; the page loads nothing but its own files and the Google Fonts.</p>
+      </section>
+      <aside class="about-side">
+        <section class="panel prose" aria-labelledby="aboutMe">
+          <h2 id="aboutMe">Made by</h2>
+          <p><strong>Max Körbächer</strong>, Managing Director at Liquid Reply in Munich, Governing Board member of the CNCF, CNCF and AAIF ambassador, and member of the Linux Foundation Europe Advisory Board.</p>
+          <ul class="about-links">
+            <li><a href="https://max.koerbaecher.io" target="_blank" rel="noopener">max.koerbaecher.io</a></li>
+            <li><a href="https://github.com/mkorbi" target="_blank" rel="noopener">github.com/mkorbi</a></li>
+          </ul>
+        </section>
+        <section class="panel prose" aria-labelledby="aboutContribute">
+          <h2 id="aboutContribute">Contribute and discuss</h2>
+          <p>AI Fit is open source and gets better with every correction. Help is welcome in any size:</p>
+          <ul>
+            <li><strong>A number is wrong, or a GPU or model is missing:</strong> <a href="https://github.com/mkorbi/ai-fit/issues/new" target="_blank" rel="noopener">open an issue</a> with a link to the source.</li>
+            <li><strong>Questions, ideas, your own results:</strong> start a thread in <a href="https://github.com/mkorbi/ai-fit/discussions" target="_blank" rel="noopener">GitHub Discussions</a>.</li>
+            <li><strong>You measured a real deployment:</strong> add it as a calibration anchor in <code>tests/anchors.js</code>, so the model is checked against it from then on.</li>
+            <li><strong>Code or catalog changes:</strong> fork the repository, run <code>node tests/anchors.js</code>, <code>node tests/ep.js</code> and <code>node tests/sim.js</code>, and open a <a href="https://github.com/mkorbi/ai-fit/pulls" target="_blank" rel="noopener">pull request</a>. The README explains the catalog fields and the import and verification tools.</li>
+          </ul>
+          <p class="about-repo"><a class="about-btn" href="https://github.com/mkorbi/ai-fit" target="_blank" rel="noopener">mkorbi/ai-fit on GitHub</a></p>
+        </section>
+      </aside>
+    </div>
+
+    <div class="view method-grid" data-mode="method" id="viewMethod" hidden>
       <section class="panel prose">
         <h2>How the numbers are made</h2>
         <p>Everything here is a roofline estimate. It is meant to get the order of magnitude and the trade-offs right (memory versus bandwidth versus compute versus network) before you rent or buy anything. Measure on the real stack before you commit; the assumptions panel lets you dial the model to what you measure.</p>
+        <h3>In short</h3>
+        <p>Three things limit how many people one setup serves, and the planner reports whichever bites first:</p>
+        <ul>
+          <li><strong>Memory.</strong> The weights take a fixed slice of accelerator memory. Whatever is left holds the KV cache, the model's working memory of each conversation, which grows with every token of context. Free memory divided by one session's KV cache is the most sessions that can be in flight at once.</li>
+          <li><strong>Speed.</strong> Every generated token reads all active weights plus the KV cache of every request in the batch. The more requests share a batch, the slower each one gets. The batch stops growing when a user would drop below the tokens-per-second target.</li>
+          <li><strong>Prefill.</strong> Every new prompt must be read in before the first output token appears. That costs compute and slows down the requests that are already generating. Long prompts with many turns can saturate a replica long before memory runs out.</li>
+        </ul>
+        <p>Users are concurrent requests divided by the share of time each user has a request in flight, with headroom for the moments when more of them are active than on average. The sections below give the formulas.</p>
         <h3>Memory</h3>
         <p>Each accelerator may use <code>util</code> of its memory (vLLM's <code>gpu_memory_utilization</code>). The weights of one replica are split evenly over its TP × PP accelerators; a fixed runtime overhead plus a share of the weight shard is reserved on each. What remains is the KV cache pool of the replica:</p>
         <pre>pool = TP·PP · (mem·util − overhead) − weights
-weights = params · (0.98 · bytes(precision) + 0.02 · 2)</pre>
-        <p>Bytes per parameter: BF16 2, FP8 and INT8 1, INT4 0.52, FP4 0.53 (group scales included). KV bytes per token per layer: <code>2 · kv_heads · head_dim · bytes</code> for standard and grouped-query attention, <code>(d_c + d_rope) · bytes</code> for multi-head latent attention, nothing for linear-attention or state-space layers (they keep a small constant state per sequence). Sliding-window and chunked layers hold at most <code>window</code> tokens. A shared prefix that is prefix-cached is stored once per replica and subtracted from every session; the pool also loses a fragmentation share to paged blocks. When TP exceeds the number of KV heads (or the model uses MLA) the KV cache is replicated across ranks unless data-parallel attention is on.</p>
-        <p><strong>Sessions resident.</strong> With "kept in GPU memory" every user's session must fit; otherwise only in-flight requests (users × activity) do. Idle sessions parked in host RAM count against <code>0.8 · host RAM · nodes</code>; the remainder re-prefill from cold.</p>
+weights = (params − p16) · bytes(precision) + p16 · 2
+p16     = vocab · d_model · (1 if tied else 2) + layers · d_model · (4 + experts)</pre>
+        <p><code>p16</code> are the parameters every quantized checkpoint keeps in 16 bits: the input embeddings and the output head (stored once when they are tied), plus the norms and, for mixture-of-experts models, the routers. For a small model with a large vocabulary that is 10–20% of the weights, so it matters at INT4 and FP4. Models that also keep attention in BF16 (gpt-oss) name their 16-bit share directly. Bytes per quantized parameter, group scales included: BF16 2, FP8 and INT8 1, INT4 0.52 (128-value groups), NVFP4 0.5625 (16-value blocks with an FP8 scale), MXFP4 0.53 (32-value blocks with an 8-bit exponent scale). FP4 counts as MXFP4 when the checkpoint ships in it or on AMD CDNA 4, as NVFP4 otherwise. KV bytes per token per layer: <code>2 · kv_heads · head_dim · bytes</code> for standard and grouped-query attention, <code>(d_c + d_rope) · bytes</code> for multi-head latent attention, nothing for linear-attention or state-space layers (they keep a small constant state per sequence). Sliding-window and chunked layers hold at most <code>window</code> tokens. A shared prefix that is prefix-cached is stored once per replica and subtracted from every session; the pool also loses a fragmentation share to paged blocks. When TP exceeds the number of KV heads (or the model uses MLA) the KV cache is replicated across ranks unless data-parallel attention is on (mixture-of-experts models only; it costs a copy of the dense weights per rank, see below). The compatibility matrix applies the same rule, so turn data-parallel attention on to see the smaller layouts MLA models reach with it.</p>
+        <p><strong>Sessions resident.</strong> With "kept in GPU memory" every user's session must fit; otherwise only in-flight requests (the planned concurrency below) do. Idle sessions parked in host RAM count against <code>0.8 · host RAM · nodes</code>; the remainder re-prefill from cold.</p>
         <h3>Decode</h3>
         <p>One decode step for a batch of <code>b</code> requests reads the weights that are touched (for mixture-of-experts: <code>1 − (1 − k/E)^tokens</code> of the routed experts, plus the dense part) and the KV cache of every request, then runs <code>2 · active_params + attention</code> FLOPs per token. Pipeline stages re-read the weights per micro-batch, which is why PP is slower than TP inside a node:</p>
         <pre>t_bw   = (weights_read + b · kv(ctx) / PP) / (TP · bandwidth · bw_eff)
@@ -411,22 +520,41 @@ step   = (max(t_bw, t_comp) + t_comm) · (1 + bubble · (PP − 1) / PP)</pre>
         <h3>Prefill and turns</h3>
         <p>A turn prefills only the tokens that are not cached: the new prompt when the session's KV was retained, the whole conversation minus the shared prefix when it was evicted. Prefill runs on the TP accelerators of one replica at <code>mfu</code> of peak; attention costs <code>2 · heads · (d_qk + d_v) · Σ min(position, window)</code> over the new positions. Restoring a parked session adds <code>kv_session / (TP · restore_bw)</code>. Time to first token is the warm case for the retention policy you chose; the cold case is shown next to it.</p>
         <p>Prefill and decode share the accelerators (chunked prefill): with <code>λ</code> requests per second per replica, prefill takes a share <code>f = λ · prefill_flops / (TP · PP · peak · mfu)</code> of the time and every decode step stretches by <code>1 / (1 − f)</code>. <code>λ = b / (TTFT + output · ITL)</code> is solved as a fixed point. Above 85% the replica is called prefill-saturated. With prefill/decode disaggregation that work moves to a separate pool sized <code>λ · prefill_flops / (peak · mfu)</code> accelerators per replica.</p>
+        <h3>Expert parallelism and data-parallel attention</h3>
+        <p>Mixture-of-experts models can split a group of <code>N</code> accelerators in three ways, as vLLM and SGLang do:</p>
+        <ul>
+          <li><strong>Tensor parallel (TP N).</strong> Every layer, experts included, is sliced N ways. Two all-reduces per layer. KV is replicated when N exceeds the KV heads, and always with MLA.</li>
+          <li><strong>Data-parallel attention.</strong> Each rank runs attention for its own requests: no KV replication and one all-reduce per layer (around the experts, which stay sliced), but every rank holds the dense weights of its stage, and a single request's prefill attention runs on one rank.</li>
+          <li><strong>Data-parallel attention with expert parallelism (EP N).</strong> Each rank also holds <code>E / N</code> whole experts. Tokens travel to their experts' ranks and back in an all-to-all per MoE layer, and that is the only traffic between ranks, so the group may span nodes.</li>
+        </ul>
+        <pre>weights per rank   = dense / PP + experts / (N · PP)            with DP attention
+weights read/step  = dense (DP attn) or dense / N, + experts · min(1, touched · imb) / N
+expert FLOPs       × imb                                          busiest rank sets the pace
+all-to-all / layer = 2 · latency + 3 bytes · tokens_per_rank · k · d_model · (N − 1) / N / bw</pre>
+        <p><code>imb</code> is the expert load imbalance (assumptions panel; 1.2 by default, about 1.1 with redundant hot experts). Dispatch is sent in FP8 and the combine in BF16, hence 3 bytes per element. When the group spans nodes, the share <code>1 − node_size / N</code> of the all-to-all crosses the network while the rest uses the node fabric. "Best for this workload" tries both expert layouts for MoE models; groups wider than a node are allowed for DP attention with EP even when cross-node TP is not.</p>
+        <p>Where it helps: across nodes, a single EP group stores every expert once instead of once per replica and keeps the large all-reduces off the network, so multi-node DeepSeek or Kimi deployments serve several times more sessions. Inside one node it is roughly a wash in this model: its real gain there, bigger and faster expert matmuls than thin TP slices, is not modeled.</p>
         <h3>Speculative decoding</h3>
         <p>With <code>k</code> draft tokens accepted at rate <code>α</code>, a step produces <code>(1 − α^(k+1)) / (1 − α)</code> tokens while its compute and collective traffic grow by <code>k + 1</code> and memory traffic barely changes, so the gain is largest when decode is memory-bound and fades once compute saturates.</p>
+        <h3>Bursts</h3>
+        <p>Users × activity is how many requests are in flight on average. At any moment the count varies: if each of <code>n</code> users is active a share <code>a</code> of the time, the number active at once is binomial with mean <code>n·a</code> and standard deviation <code>√(n·a·(1 − a))</code>. "Plan for bursts" sizes for</p>
+        <pre>concurrency = n·a + z · √(n·a·(1 − a))      z = 0 (average), 1.65 (95%), 2.33 (99%)</pre>
+        <p>and the user counts the planner reports invert the same formula. Headroom matters most for small groups: 10 users at 25% average 2.5 requests but reach 5 at the 95th percentile. For 1,000 users at 10% it adds 16%. With 100% activity there is no variation. Without headroom, busy moments queue and the time to first token grows.</p>
         <h3>Capacity and the reverse search</h3>
-        <p>For a layout, the memory limit is the number of sessions that fit the pool; the speed limit is the largest batch per replica whose per-user tokens/s still clear the target without prefill saturation, provided the time to first token is within its limit (a binary search over the load model). Concurrency is the lower of the two times the replica count; users are concurrency divided by activity. The context-at-load figure inverts the memory equation for the sessions you asked to keep resident.</p>
-        <p>"Best for this workload" tries every TP in {1…64} that divides the head count (across nodes only if you allow it) and every PP in {1…16}, filling the accelerator count with replicas, and keeps the layout with the most users, then the fewest idle accelerators, then the highest per-user speed. The workload planner does the same per candidate accelerator with an open count: it sizes one replica, multiplies until the users fit, and keeps the smallest count, then the lowest hourly price. Cost per million output tokens is hourly price over aggregate decode throughput.</p>
+        <p>For a layout, the memory limit is the number of sessions that fit the pool; the speed limit is the largest batch per replica whose per-user tokens/s still clear the target without prefill saturation, provided the time to first token is within its limit (a binary search over the load model). Concurrency is the lower of the two times the replica count; users are the most whose planned concurrency (see Bursts) fits it. The context-at-load figure inverts the memory equation for the sessions you asked to keep resident.</p>
+        <p>"Best for this workload" tries every group width in {1…64} that divides the head count (or the expert count under EP; across nodes only if you allow it, or with DP attention and EP) and every PP in {1…16}, with and without expert parallelism for MoE models, filling the accelerator count with replicas, and keeps the layout with the most users, then the fewest idle accelerators, then the highest per-user speed. The workload planner does the same per candidate accelerator with an open count: it sizes one replica, multiplies until the users fit, and keeps the smallest count, then the lowest hourly price. Cost per million output tokens is hourly price over aggregate decode throughput.</p>
         <h3>What is not modeled</h3>
         <ul>
-          <li>Scheduling detail: queueing, batching windows, chunk sizes, CUDA graph capture limits, CPU overhead of the serving process.</li>
-          <li>Expert-parallel all-to-all traffic (treated like the tensor-parallel all-reduce), load imbalance across experts, and MoE kernels that run below the BF16 roofline.</li>
+          <li>Scheduling detail: queueing delay beyond the burst headroom, correlated bursts (everyone arriving at 9:00), batching windows, chunk sizes, CUDA graph capture limits, CPU overhead of the serving process.</li>
+          <li>MoE kernel efficiency: thin TP slices of small experts and grouped expert matmuls both run below the roofline in practice; redundant experts (EPLB), token deduplication across nodes (DeepEP) and dense layers that some MoE models keep (all layers count as MoE here).</li>
           <li>Quality effects of quantization or RoPE scaling; the tool only flags contexts beyond the native window.</li>
           <li>Vision encoders, tool-call overheads, and multi-LoRA serving.</li>
+          <li>The draft model's own cost in speculative decoding. Built-in multi-token-prediction heads (DeepSeek, Qwen3-Next, GLM, Nemotron) are close to free; a separate draft model is not.</li>
+          <li>Input-token cost. Cost per million tokens counts output tokens only; prefill work shows up as fewer output tokens per second, not as a separate input price.</li>
         </ul>
-        <p class="hint">Catalog figures come from vendor data sheets and model cards as of mid-2026; entries marked ~ are announced or derived. Correct them in the catalog view if you have better numbers.</p>
+        <p class="hint">Catalog figures come from vendor data sheets, cloud price pages and Hugging Face model configs, checked November 2026; entries marked ~ are announced or derived. Correct them in the catalog view if you have better numbers.</p>
       </section>
-      <section class="panel prose" style="margin-top:18px">
-        <h2>Glossary</h2>
+      <section class="panel prose gloss-panel" aria-labelledby="glossTitle">
+        <h2 id="glossTitle">Glossary</h2>
         <p>Every dotted term in the app has one of these behind it: hover, focus or tap the term for the short version.</p>
         <dl class="glossary" id="glossary"></dl>
       </section>
@@ -434,8 +562,16 @@ step   = (max(t_bw, t_comp) + t_comm) · (1 + bubble · (PP − 1) / PP)</pre>
   </section>
 </main>
 
+<footer class="site-foot">
+  <span>© 2026 Max Körbächer</span>
+  <span>Code under the <a href="https://github.com/mkorbi/ai-fit/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></span>
+  <span><a href="https://github.com/mkorbi/ai-fit" target="_blank" rel="noopener">Source on GitHub</a></span>
+  <span>Catalog checked November 2026</span>
+</footer>
+
 <script src="catalog.js"></script>
 <script src="glossary.js"></script>
 <script src="engine.js"></script>
 <script src="sim.js"></script>
 <script src="app.js"></script>
+
