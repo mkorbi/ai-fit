@@ -140,3 +140,14 @@ against a benchmark of your real stack before buying or renting.
 Quick sanity anchors the model reproduces: Llama 3.3 70B in BF16 on 8× H100 SXM keeps roughly 1.3M KV tokens
 (about 9 sessions of 128k) and decodes at 25-30 tok/s per user; DeepSeek-V3 in FP8 on 8× H200 with data-parallel
 attention holds about 60 concurrent 64k sessions at 20 tok/s each.
+
+## Contributing
+
+Corrections and additions are welcome: open an [issue](https://github.com/mkorbi/ai-fit/issues) for a wrong number
+or a missing GPU or model (with a link to the source), use [Discussions](https://github.com/mkorbi/ai-fit/discussions)
+for questions and ideas, and send pull requests for code or catalog changes. Run `node tests/anchors.js`,
+`node tests/ep.js` and `node tests/sim.js` before opening one.
+
+## License
+
+MIT, see [LICENSE](LICENSE). © 2026 Max Körbächer.

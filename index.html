@@ -205,6 +205,20 @@ dl.glossary { margin: 0; display: grid; gap: 10px; }
 dl.glossary dt { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
 dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .gmeta { font-size: 12.5px; margin-top: 2px; }
+/* About view */
+.about-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (min-width: 1000px) { .about-grid { grid-template-columns: minmax(0, 780px) minmax(320px, 400px); justify-content: center; } }
+.about-main.prose { max-width: none; }
+.about-lead { font-size: 17px; line-height: 1.55; color: var(--ink); }
+.about-side { display: grid; gap: 18px; }
+.about-side .prose { max-width: none; }
+.about-links { list-style: none; padding: 0 !important; }
+.about-repo { margin-top: 4px; }
+.about-btn { display: inline-block; padding: 9px 14px; background: var(--accent); color: var(--accent-ink); font-family: var(--font-display); font-weight: 600; text-decoration: none; border-radius: 3px; }
+.about-btn:hover { filter: brightness(1.08); }
+.site-foot { display: flex; flex-wrap: wrap; gap: 6px 22px; justify-content: center; padding: 28px 0 26px; margin-top: 30px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.site-foot a { color: inherit; }
+.site-foot a:hover { color: var(--accent); }
 
 /* simulator */
 .sim { display: grid; gap: 14px; max-width: 1240px; margin-inline: auto; width: 100%; }
@@ -307,6 +321,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
     <button class="tab" role="tab" data-mode="catalog" aria-selected="false" type="button">Catalog</button>
     <button class="tab" role="tab" data-mode="method" aria-selected="false" type="button">Method</button>
     <button class="tab" role="tab" data-mode="sim" aria-selected="false" type="button">Simulator</button>
+    <button class="tab" role="tab" data-mode="about" aria-selected="false" type="button">About</button>
   </nav>
 </header>
 
@@ -442,6 +457,47 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
 
     <div class="view" data-mode="sim" id="viewSim" hidden></div>
 
+    <div class="view about-grid" data-mode="about" id="viewAbout" hidden>
+      <section class="panel prose about-main" aria-labelledby="aboutTitle">
+        <h2 id="aboutTitle">About AI Fit</h2>
+        <p class="about-lead">Will this model fit on these GPUs? How many people can use it at once, with how much context, at what speed and cost? AI Fit answers those questions for open-weight models you host yourself, before you buy or rent anything.</p>
+        <h3>Why it exists</h3>
+        <p>The answer is spread over many places: GPU datasheets, cloud price pages, model configs on Hugging Face, the quantization tables of vLLM, SGLang and TensorRT-LLM, and a lot of rules of thumb. Each piece is easy to find; putting them together for your workload is not. AI Fit puts them into one model you can turn the knobs of, and shows its work: every formula is on the Method page, and every number in the catalog names its source.</p>
+        <h3>What it is good for</h3>
+        <ul>
+          <li><strong>Sizing.</strong> How many users and how much context a given set of GPUs serves, or the smallest setup for a given workload, with the cost per hour and per million tokens.</li>
+          <li><strong>Comparing.</strong> 59 accelerators from NVIDIA, AMD, Intel, Google, AWS, Apple and Tenstorrent, and 68 open-weight models, side by side.</li>
+          <li><strong>Checking what runs where.</strong> Which number formats each chip and serving engine supports, and which quantized checkpoints exist for each model.</li>
+          <li><strong>Seeing the trade-offs.</strong> Context against users against speed, and how much KV-cache quantization, prefix caching, speculative decoding, expert parallelism or parking idle sessions in host memory buys.</li>
+          <li><strong>Explaining it to others.</strong> The Simulator shows the same numbers as a rack filling up and a crowd waiting, for people who do not read formulas.</li>
+        </ul>
+        <p>It is a planning estimate, not a benchmark. Use it to get the order of magnitude and the trade-offs right, then measure on your own stack before you commit; the assumptions panel lets you match the model to what you measure.</p>
+        <h3>Privacy</h3>
+        <p>Everything runs in your browser. Your inputs and custom catalog entries are stored in this browser only; the page loads nothing but its own files and the Google Fonts.</p>
+      </section>
+      <aside class="about-side">
+        <section class="panel prose" aria-labelledby="aboutMe">
+          <h2 id="aboutMe">Made by</h2>
+          <p><strong>Max Körbächer</strong>, Managing Director at Liquid Reply in Munich, Governing Board member of the CNCF, CNCF and AAIF ambassador, and member of the Linux Foundation Europe Advisory Board.</p>
+          <ul class="about-links">
+            <li><a href="https://max.koerbaecher.io" target="_blank" rel="noopener">max.koerbaecher.io</a></li>
+            <li><a href="https://github.com/mkorbi" target="_blank" rel="noopener">github.com/mkorbi</a></li>
+          </ul>
+        </section>
+        <section class="panel prose" aria-labelledby="aboutContribute">
+          <h2 id="aboutContribute">Contribute and discuss</h2>
+          <p>AI Fit is open source and gets better with every correction. Help is welcome in any size:</p>
+          <ul>
+            <li><strong>A number is wrong, or a GPU or model is missing:</strong> <a href="https://github.com/mkorbi/ai-fit/issues/new" target="_blank" rel="noopener">open an issue</a> with a link to the source.</li>
+            <li><strong>Questions, ideas, your own results:</strong> start a thread in <a href="https://github.com/mkorbi/ai-fit/discussions" target="_blank" rel="noopener">GitHub Discussions</a>.</li>
+            <li><strong>You measured a real deployment:</strong> add it as a calibration anchor in <code>tests/anchors.js</code>, so the model is checked against it from then on.</li>
+            <li><strong>Code or catalog changes:</strong> fork the repository, run <code>node tests/anchors.js</code>, <code>node tests/ep.js</code> and <code>node tests/sim.js</code>, and open a <a href="https://github.com/mkorbi/ai-fit/pulls" target="_blank" rel="noopener">pull request</a>. The README explains the catalog fields and the import and verification tools.</li>
+          </ul>
+          <p class="about-repo"><a class="about-btn" href="https://github.com/mkorbi/ai-fit" target="_blank" rel="noopener">mkorbi/ai-fit on GitHub</a></p>
+        </section>
+      </aside>
+    </div>
+
     <div class="view method-grid" data-mode="method" id="viewMethod" hidden>
       <section class="panel prose">
         <h2>How the numbers are made</h2>
@@ -512,6 +568,13 @@ all-to-all / layer = 2 · latency + 3 bytes · tokens_per_rank · k · d_model �
     </div>
   </section>
 </main>
+
+<footer class="site-foot">
+  <span>© 2026 Max Körbächer</span>
+  <span>Code under the <a href="https://github.com/mkorbi/ai-fit/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></span>
+  <span><a href="https://github.com/mkorbi/ai-fit" target="_blank" rel="noopener">Source on GitHub</a></span>
+  <span>Catalog checked November 2026</span>
+</footer>
 
 <script src="catalog.js"></script>
 <script src="glossary.js"></script>
