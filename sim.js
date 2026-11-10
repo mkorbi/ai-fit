@@ -22,9 +22,9 @@ const Sim = (() => {
   const sliderFromUsers = (u) => Math.round(1000 * Math.log(Math.max(1, u)) / Math.log(USERS_MAX));
   const PREC = { bf16: 'BF16', fp8: 'FP8', int4: 'INT4', fp4: 'FP4' };
   const KNOBS = [
-    ['hw',          { label: 'GPU type',       values: HW_POOL, show: (v) => hwById(v).name, term: 'accelerator' }],
+    ['hw',          { label: 'GPU type',       select: () => CAT.HARDWARE, groupOf: (x) => x.vendor, show: (v) => hwById(v).name, term: 'accelerator' }],
     ['count',       { label: 'GPUs',           values: [1, 2, 4, 8, 16, 32], show: String, term: 'count' }],
-    ['model',       { label: 'Model',          values: MODEL_POOL, show: (v) => modelById(v).name, term: 'model' }],
+    ['model',       { label: 'Model',          select: () => CAT.MODELS, groupOf: (x) => x.family, show: (v) => modelById(v).name, term: 'model' }],
     ['wPrec',       { label: 'Weights',        values: ['bf16', 'fp8', 'int4', 'fp4'], show: (v) => PREC[v], term: 'w-prec' }],
     ['kvPrec',      { label: 'KV cache',       values: ['bf16', 'fp8', 'int4'], show: (v) => PREC[v], term: 'kv-prec' }],
     ['ctx',         { label: 'Context',        values: CTX_STEPS, show: (v) => fmtTok(v) + ' tokens', term: 'ctx' }],
@@ -56,7 +56,13 @@ const Sim = (() => {
     const r = E.autoConfig(p).best;
     const ctxOK = s.ctx <= m.maxCtx;
     let limit, explain;
-    if (!r.fits) {
+    if (!r.loadable) {
+      limit = 'format';
+      const wOK = E.formatSupport(hw, s.wPrec, 'none') !== 'unsupported';
+      const works = ['bf16', 'fp8', 'int4', 'fp4'].filter((w) => E.formatSupport(hw, w, 'none') !== 'unsupported').map((w) => PREC[w]);
+      explain = wOK ? `${hw.name} cannot hold a ${PREC[s.kvPrec]} KV cache. Pick another KV cache precision.`
+        : `${hw.name} cannot run ${PREC[s.wPrec]} weights: its chip generation has no kernel for that format. It runs ${works.join(', ')} weights.`;
+    } else if (!r.fits) {
       limit = 'weights';
       explain = r.kvAvailRaw <= 0 ? `The weights alone (${fmtGB(r.W)}) do not fit on ${r.G} × ${hw.mem} GB. Add GPUs or lower the weight precision.` : `The weights fit (${fmtGB(r.W)}) but not a single ${fmtTok(s.ctx)} session next to them (${fmtGB(r.kv.perSession)}). Shorter context, FP8 KV cache or more GPUs.`;
     } else if (!ctxOK) { limit = 'context'; explain = `${model.name} cannot address ${fmtTok(s.ctx)} tokens; its maximum is ${fmtTok(m.maxCtx)}. Pick a long-context model or shorten the sessions.`; }
@@ -217,6 +223,14 @@ const Sim = (() => {
     clearTimeout(sweepTimer); sweepTimer = setTimeout(renderSweeps, 120);
   }
   function knobRow([key, K]) {
+    if (K.select) {   // the whole catalog, grouped by vendor or model family
+      const groups = new Map();
+      for (const x of K.select()) { const g = K.groupOf(x) || 'Other'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(x); }
+      const sel = el('select', { class: 'sim-select', 'aria-label': K.label, title: K.show(s[key]) },
+        [...groups].map(([g, items]) => el('optgroup', { label: g }, items.map((x) => el('option', { value: x.id, selected: x.id === s[key] }, x.name + (x.approx ? ' ~' : ''))))));
+      sel.addEventListener('change', () => { s[key] = sel.value; sel.title = K.show(s[key]); recompute(false); });
+      return el('div', { class: 'sim-knob' }, term(K.term, K.label), sel);
+    }
     if (K.slider) {
       const show = el('span', { class: 'sim-val' }, K.show(s[key]));
       const input = el('input', { type: 'range', class: 'sim-range', min: 0, max: 1000, step: 1, value: sliderFromUsers(s[key]), 'aria-label': K.label, 'aria-valuetext': `${K.show(s[key])} people` });
@@ -272,12 +286,12 @@ const Sim = (() => {
   }
   function renderExplain() {
     const box = root.querySelector('#simExplain'); if (!box) return;
-    const cls = { ok: 'good', memory: 'bad', speed: 'bad', weights: 'bad', context: 'bad', prefill: 'bad' }[ev.limit];
-    const label = { ok: 'ROOM TO SPARE', memory: 'MEMORY-BOUND', speed: 'BANDWIDTH-BOUND', weights: 'DOES NOT LOAD', context: 'CONTEXT TOO LONG', prefill: 'PREFILL-BOUND' }[ev.limit];
+    const cls = { ok: 'good', memory: 'bad', speed: 'bad', weights: 'bad', format: 'bad', context: 'bad', prefill: 'bad' }[ev.limit];
+    const label = { ok: 'ROOM TO SPARE', memory: 'MEMORY-BOUND', speed: 'BANDWIDTH-BOUND', weights: 'DOES NOT LOAD', format: 'FORMAT NOT SUPPORTED', context: 'CONTEXT TOO LONG', prefill: 'PREFILL-BOUND' }[ev.limit];
     box.replaceChildren(el('div', { class: 'sim-limit ' + cls }, label), el('p', null, ev.explain));
     const ov = root.querySelector('#simOverlay');
     if (ov) {
-      const stop = ev.limit === 'weights' || ev.limit === 'context';
+      const stop = ev.limit === 'weights' || ev.limit === 'format' || ev.limit === 'context';
       ov.hidden = !stop;
       if (stop) ov.replaceChildren(el('div', { class: 'sim-ovtitle' }, label), el('p', null, ev.explain));
     }
@@ -293,7 +307,8 @@ const Sim = (() => {
   }
   function renderSweeps() {
     const box = root.querySelector('#simSweeps'); if (!box) return;
-    const byCtx = sweep(s, 'ctx', CTX_STEPS), byHw = sweep(s, 'hw', HW_POOL), byModel = sweep(s, 'model', MODEL_POOL), byKv = sweep(s, 'kvPrec', ['bf16', 'fp8', 'int4']), byW = sweep(s, 'wPrec', ['bf16', 'fp8', 'int4', 'fp4']);
+    const withCurrent = (pool, v) => (pool.includes(v) ? pool : pool.concat(v));   // the chosen GPU or model always gets a bar
+    const byCtx = sweep(s, 'ctx', CTX_STEPS), byHw = sweep(s, 'hw', withCurrent(HW_POOL, s.hw)), byModel = sweep(s, 'model', withCurrent(MODEL_POOL, s.model)), byKv = sweep(s, 'kvPrec', ['bf16', 'fp8', 'int4']), byW = sweep(s, 'wPrec', ['bf16', 'fp8', 'int4', 'fp4']);
     box.replaceChildren(
       el('h3', null, 'How many people this setup serves if you change one thing'),
       el('div', { class: 'sim-charts' }, barChart('context per person', byCtx, s.ctx, (v) => fmtTok(v), 'ctx'),
