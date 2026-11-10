@@ -667,13 +667,45 @@
   }
 
   /* ----- catalog ----- */
+  /* One table whose rows are clustered under collapsible group headers (vendor, model family), so the columns stay
+   * aligned across groups. Open groups are remembered per browser under `storeKey`. */
+  function groupedTable(cols, groups, opts, storeKey) {
+    const numeric = new Set((opts && opts.numeric) || []);
+    const open = new Set(LS.get(storeKey, []));
+    const save = () => LS.set(storeKey, [...open]);
+    const bodies = groups.map((g) => {
+      const btn = h('button', { type: 'button', class: 'grp-toggle', 'aria-expanded': String(open.has(g.key)) },
+        h('span', { class: 'grp-arrow', 'aria-hidden': 'true' }), h('b', null, g.label), h('span', { class: 'grp-count' }, String(g.rows.length)), h('span', { class: 'grp-meta' }, g.meta));
+      const rows = g.rows.map((row) => h('tr', { hidden: !open.has(g.key) }, row.map((c, i) => h('td', { class: numeric.has(i) ? 'n' : 't' }, c))));
+      const set = (on) => { btn.setAttribute('aria-expanded', String(on)); rows.forEach((r) => { r.hidden = !on; }); if (on) open.add(g.key); else open.delete(g.key); };
+      btn.addEventListener('click', () => { set(btn.getAttribute('aria-expanded') !== 'true'); save(); });
+      return { set, body: h('tbody', { class: 'grp' }, h('tr', { class: 'grp-head' }, h('th', { colspan: cols.length }, btn)), rows) };
+    });
+    const all = (on) => { bodies.forEach((b) => b.set(on)); save(); };
+    return h('div', null,
+      h('div', { class: 'row-btns grp-tools' }, h('button', { class: 'ghost', type: 'button', onclick: () => all(true) }, 'Expand all'), h('button', { class: 'ghost', type: 'button', onclick: () => all(false) }, 'Collapse all')),
+      h('div', { class: 'tw' }, h('table', { class: 'data grouped' },
+        h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: numeric.has(i) ? 'n' : null }, typeof c === 'string' ? c : T(c.k, c.t))))),
+        bodies.map((b) => b.body))));
+  }
+  /* Items grouped by key in order of first appearance. */
+  function clusterBy(items, keyOf) {
+    const map = new Map();
+    for (const it of items) { const k = keyOf(it) || 'Custom'; if (!map.has(k)) map.set(k, []); map.get(k).push(it); }
+    return [...map.entries()];
+  }
+  const span = (vals, fmt, unit) => { const lo = Math.min(...vals), hi = Math.max(...vals); return lo === hi ? `${fmt(lo)} ${unit}` : `${fmt(lo)}–${fmt(hi)} ${unit}`; };
   function renderCatalog() {
-    const hwRows = allHardware().map((hw) => [
-      h('b', null, hw.name + (hw.approx ? ' ~' : '')), hw.vendor, fmtNum(hw.mem), fmtNum(hw.bw), hw.tflops.fp16 ? fmtNum(hw.tflops.fp16) : '—', hw.tflops.fp8 ? fmtNum(hw.tflops.fp8) : '—', hw.tflops.fp4 ? fmtNum(hw.tflops.fp4) : '—',
+    const hwRow = (hw) => [
+      h('b', null, hw.name + (hw.approx ? ' ~' : '')), fmtNum(hw.mem), fmtNum(hw.bw), hw.tflops.fp16 ? fmtNum(hw.tflops.fp16) : '—', hw.tflops.fp8 ? fmtNum(hw.tflops.fp8) : '—', hw.tflops.fp4 ? fmtNum(hw.tflops.fp4) : '—',
       `${(LINKS[hw.link] || LINKS.none).name}${hw.linkBw ? ' ' + fmtNum(hw.linkBw) + ' GB/s' : ''}`, fmtNum(hw.nodeGpus), hw.tdp != null ? fmtNum(hw.tdp) : '—', hw.price != null ? fmtMoney(hw.price) : '—',
       ARCHS[hw.arch] ? ARCHS[hw.arch].name : '—', ARCHS[hw.arch] ? ARCHS[hw.arch].native.map((x) => x.toUpperCase()).join(' ') : '—', ARCHS[hw.arch] ? ARCHS[hw.arch].weightOnly.map((x) => x.toUpperCase()).join(' ') : '—',
-    ]);
-    $('#catHardware').replaceChildren(table([{ t: 'Accelerator', k: 'accelerator' }, 'Vendor', { t: 'Memory GB', k: 'mem-gb' }, { t: 'GB/s', k: 'bw' }, { t: 'BF16 TFLOPS', k: 'tflops-bf16' }, { t: 'FP8', k: 'tflops-fp8' }, { t: 'FP4', k: 'tflops-fp4' }, { t: 'Fabric', k: 'fabric' }, { t: 'Per node', k: 'per-node' }, { t: 'W', k: 'tdp' }, { t: '$/h', k: 'price' }, { t: 'Generation', k: 'generation' }, { t: 'Native formats', k: 'native-fmt' }, { t: 'Weight-only', k: 'weight-only' }], hwRows, { numeric: [2, 3, 4, 5, 6, 8, 9, 10] }));
+    ];
+    const hwGroups = clusterBy(allHardware(), (hw) => hw.vendor).map(([vendor, list]) => ({
+      key: vendor, label: vendor, rows: list.map(hwRow),
+      meta: `${span(list.map((x) => x.mem), fmtNum, 'GB')} · ${span(list.map((x) => x.bw), fmtNum, 'GB/s')}`,
+    }));
+    $('#catHardware').replaceChildren(groupedTable([{ t: 'Accelerator', k: 'accelerator' }, { t: 'Memory GB', k: 'mem-gb' }, { t: 'GB/s', k: 'bw' }, { t: 'BF16 TFLOPS', k: 'tflops-bf16' }, { t: 'FP8', k: 'tflops-fp8' }, { t: 'FP4', k: 'tflops-fp4' }, { t: 'Fabric', k: 'fabric' }, { t: 'Per node', k: 'per-node' }, { t: 'W', k: 'tdp' }, { t: '$/h', k: 'price' }, { t: 'Generation', k: 'generation' }, { t: 'Native formats', k: 'native-fmt' }, { t: 'Weight-only', k: 'weight-only' }], hwGroups, { numeric: [1, 2, 3, 4, 5, 7, 8, 9] }, 'cb.catHwOpen'));
     const fams = ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'gaudi', 'tpu', 'other'];
     const engRows = [];
     for (const [k, e] of Object.entries(ENGINES)) {
@@ -684,12 +716,16 @@
     $('#catEngines').replaceChildren(table(['Engine', 'Format'].concat(fams.map((f) => f.toUpperCase())), engRows), h('ul', { class: 'warnings', style: 'margin-top:10px' }, Object.values(ENGINES).filter((e) => e.docs).map((e) => h('li', null, h('b', null, `${e.name} (${e.version}, checked ${e.checked}${e.unverified ? ', not re-verified' : ''}): `), e.notes.join(' '), ' ', h('a', { href: e.docs.weights, target: '_blank', rel: 'noopener' }, 'source')))));
     const lint = catalogLint();
     $('#catLint').replaceChildren(...(lint.length ? [h('b', null, 'Consistency checks: '), h('ul', { class: 'warnings' }, lint.map((t) => h('li', null, h('span', { class: 'chip warn' }, 'check'), ' ', t)))] : [h('span', { class: 'chip good' }, 'ok'), " Every accelerator's TFLOPS columns agree with its chip generation."]));
-    const mRows = allModels().map((m0) => {
+    const mRow = (m0) => {
       const m = E.norm(m0);
       const arch = m.attn.map((l) => `${l.n}× ${l.type}${l.window ? ' ' + fmtTok(l.window) : ''}`).join(' + ') + (m.sparse ? ` · sparse top-${m.sparse.topk}` : '');
-      return [h('b', null, m.name + (m.approx ? ' ~' : '')), m.family, fmtNum(m.params, 1), m.moe ? fmtNum(m.active, 1) : '—', fmtNum(m.layers), `${m.nHeads} / ${m.attn.some((l) => l.type === 'mla') ? 'MLA' : m.nKv}`, fmtGB(E.kvPerTokenFull(m, 'bf16')), fmtGB(E.kvAtCtx(m, 'bf16', 1e6)), fmtTok(m.maxCtx) + (m.nativeCtx && m.nativeCtx < m.maxCtx ? ` (${fmtTok(m.nativeCtx)} native)` : ''), arch, m.nativePrec ? m.nativePrec.toUpperCase() : '—', m.hf ? h('a', { href: 'https://huggingface.co/' + m.hf, target: '_blank', rel: 'noopener' }, m.hf) : '—', m.variants ? h('span', null, ...Object.entries(m.variants).map(([k, r]) => h('span', { class: 'vlink' }, h('a', { href: 'https://huggingface.co/' + r, target: '_blank', rel: 'noopener', title: r }, k.toUpperCase()), ' '))) : '—'];
-    });
-    $('#catModels').replaceChildren(table([{ t: 'Model', k: 'model' }, 'Family', { t: 'Params B', k: 'params' }, { t: 'Active B', k: 'active' }, { t: 'Layers', k: 'layers' }, { t: 'Heads / KV heads', k: 'heads' }, { t: 'KV per token (BF16)', k: 'kv-per-token' }, { t: 'KV per 1M-token session', k: 'kv-1m' }, { t: 'Max context', k: 'max-ctx' }, { t: 'Attention layers', k: 'attn-layers' }, { t: 'Ships in', k: 'ships-in' }, { t: 'Verified against', k: 'verified' }, { t: 'Known checkpoints', k: 'checkpoints' }], mRows, { numeric: [2, 3, 4, 5, 6, 7, 8] }));
+      return [h('b', null, m.name + (m.approx ? ' ~' : '')), fmtNum(m.params, 1), m.moe ? fmtNum(m.active, 1) : '—', fmtNum(m.layers), `${m.nHeads} / ${m.attn.some((l) => l.type === 'mla') ? 'MLA' : m.nKv}`, fmtGB(E.kvPerTokenFull(m, 'bf16')), fmtGB(E.kvAtCtx(m, 'bf16', 1e6)), fmtTok(m.maxCtx) + (m.nativeCtx && m.nativeCtx < m.maxCtx ? ` (${fmtTok(m.nativeCtx)} native)` : ''), arch, m.nativePrec ? m.nativePrec.toUpperCase() : '—', m.hf ? h('a', { href: 'https://huggingface.co/' + m.hf, target: '_blank', rel: 'noopener' }, m.hf) : '—', m.variants ? h('span', null, ...Object.entries(m.variants).map(([k, r]) => h('span', { class: 'vlink' }, h('a', { href: 'https://huggingface.co/' + r, target: '_blank', rel: 'noopener', title: r }, k.toUpperCase()), ' '))) : '—'];
+    };
+    const mGroups = clusterBy(allModels(), (m) => m.family).map(([family, list]) => ({
+      key: family, label: family, rows: list.map(mRow),
+      meta: `${span(list.map((x) => x.params), (v) => fmtNum(v, v < 10 ? 1 : 0), 'B params')}${list.some((x) => x.moe) ? ` · ${list.filter((x) => x.moe).length} MoE` : ''}`,
+    }));
+    $('#catModels').replaceChildren(groupedTable([{ t: 'Model', k: 'model' }, { t: 'Params B', k: 'params' }, { t: 'Active B', k: 'active' }, { t: 'Layers', k: 'layers' }, { t: 'Heads / KV heads', k: 'heads' }, { t: 'KV per token (BF16)', k: 'kv-per-token' }, { t: 'KV per 1M-token session', k: 'kv-1m' }, { t: 'Max context', k: 'max-ctx' }, { t: 'Attention layers', k: 'attn-layers' }, { t: 'Ships in', k: 'ships-in' }, { t: 'Verified against', k: 'verified' }, { t: 'Known checkpoints', k: 'checkpoints' }], mGroups, { numeric: [1, 2, 3, 4, 5, 6, 7] }, 'cb.catModelOpen'));
   }
 
   /* ---------- boot ---------- */

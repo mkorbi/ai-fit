@@ -131,6 +131,15 @@ table.data td { padding: 7px 8px; border-bottom: 1px solid var(--line-2); vertic
 table.data td.n, table.data th.n { text-align: right; font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.data td.t { font-family: var(--font-body); }
 table.data tr.base td { background: var(--surface-2); }
+table.grouped tr.grp-head th { padding: 0; border-bottom: 1px solid var(--line); text-transform: none; letter-spacing: 0; }
+.grp-toggle { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 9px 8px; cursor: pointer; background: var(--surface-2); color: var(--ink); font-family: var(--font-display); font-size: 14px; }
+.grp-toggle:hover { background: var(--accent-soft); }
+.grp-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.grp-arrow::before { content: '▸'; display: inline-block; width: 1em; color: var(--muted); }
+.grp-toggle[aria-expanded="true"] .grp-arrow::before { content: '▾'; }
+.grp-count { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+.grp-meta { font-family: var(--font-body); font-size: 12.5px; font-weight: 400; color: var(--muted); }
+.grp-tools { margin-bottom: 8px; }
 table.data tr.muted td { color: var(--muted); }
 table.data .note { font-size: 12px; color: var(--muted); font-weight: 400; max-width: 34ch; }
 table.data small.up { color: var(--good-text); font-family: var(--font-mono); font-size: 11px; }
