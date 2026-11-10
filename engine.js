@@ -12,7 +12,8 @@ const Engine = (() => {
   const ARCHS_ = typeof ARCHS !== 'undefined' ? ARCHS : require('./catalog.js').ARCHS;
   const ENGINES_ = typeof ENGINES !== 'undefined' ? ENGINES : require('./catalog.js').ENGINES;
   const FAMILY_ = typeof ENGINE_FAMILY !== 'undefined' ? ENGINE_FAMILY : require('./catalog.js').ENGINE_FAMILY;
-  const BYTES_W  = { bf16: 2, fp8: 1, int8: 1, int4: 0.52, fp4: 0.53 };   // bytes per parameter incl. group scales
+  const BYTES_W  = { bf16: 2, fp8: 1, int8: 1, int4: 0.52, fp4: 0.5625 }; // bytes per parameter incl. group scales
+  const BYTES_FP4 = { nv: 0.5625, mx: 0.53 };                              // NVFP4: 16-value blocks + FP8 scale; MXFP4: 32-value blocks + E8M0 scale
   const BYTES_KV = { bf16: 2, fp8: 1, int8: 1, int4: 0.56 };              // bytes per KV element
   const W_PRECS  = ['bf16', 'fp8', 'int8', 'int4', 'fp4'];
   const KV_PRECS = ['bf16', 'fp8', 'int4'];
@@ -38,8 +39,37 @@ const Engine = (() => {
   const norm = (m) => Object.assign({ active: m.params, attn: [{ n: m.layers, type: 'full' }] }, m);
   const isMla = (m) => m.attn.some((l) => l.type === 'mla');
 
-  function weightBytes(model, prec) {
-    return model.params * 1e9 * (0.98 * BYTES_W[prec] + 0.02 * 2);   // ~2% (embeddings, norms, head) stay 16-bit
+  /* Bytes per quantized parameter. FP4 is MXFP4 when the checkpoint ships in it or on AMD CDNA 4/5, NVFP4 otherwise. */
+  function bytesPerParam(model, prec, hw) {
+    if (prec !== 'fp4') return BYTES_W[prec];
+    const mx = /mxfp4/i.test(model.nativePrec || '') || (!!hw && (hw.arch === 'gfx950' || hw.arch === 'cdna5'));
+    return mx ? BYTES_FP4.mx : BYTES_FP4.nv;
+  }
+  /* Parameters every quantized checkpoint keeps in 16 bits: input embeddings and output head (once if tied), plus
+   * ~0.5% for norms and routers. `keep16` overrides it for models that also keep attention in BF16 (gpt-oss). */
+  function keep16Params(model) {
+    const P = model.params * 1e9;
+    if (model.keep16 != null) return model.keep16 * 1e9;
+    if (model.vocab) return Math.min(P, model.vocab * model.dModel * (model.tied ? 1 : 2) + 0.005 * P);
+    return 0.02 * P;
+  }
+  function weightBytes(model, prec, hw) {
+    const P = model.params * 1e9, k = keep16Params(model);
+    return (P - k) * bytesPerParam(model, prec, hw) + k * 2;
+  }
+  /* Concurrent requests to plan for: the mean (users × activity) plus z standard deviations of how many users are
+   * active at once (binomial: each user is active a share `activity` of the time). z = 0 plans for the average. */
+  function concurrency(wl) {
+    const mean = wl.users * wl.activity, z = wl.peakZ || 0;
+    if (!z) return Math.max(1, Math.round(mean));
+    return Math.max(1, Math.min(wl.users, Math.ceil(mean + z * Math.sqrt(mean * (1 - wl.activity)))));
+  }
+  /* Most users whose planned concurrency fits `conc` request slots: the inverse of concurrency(). */
+  function usersFor(conc, wl) {
+    const c = (wl.peakZ || 0) * Math.sqrt(1 - wl.activity);
+    if (!c) return Math.floor(conc / wl.activity);
+    const x = (-c + Math.sqrt(c * c + 4 * conc)) / 2;
+    return Math.floor(x * x / wl.activity + 1e-9);
   }
   function expertSplit(model) {
     if (!model.moe) return { expert: 0, dense: model.params * 1e9 };
@@ -161,9 +191,9 @@ const Engine = (() => {
     const push = (level, text) => warnings.push({ level, text });
 
     // memory
-    const W = weightBytes(model, p.wPrec);
+    const W = weightBytes(model, p.wPrec, hw);
     const split = expertSplit(model);
-    const denseBytes = W * split.dense / (model.params * 1e9), expertBytes = W * split.expert / (model.params * 1e9);
+    const expertBytes = split.expert * bytesPerParam(model, p.wPrec, hw), denseBytes = Math.max(0, W - expertBytes);
     const overhead = adv.overheadGB * 1e9 + adv.overheadFrac * (W / G);
     const capPerGpu = hw.mem * 1e9 * adv.util - overhead;
     const kvAvailRaw = G * capPerGpu - W;
@@ -180,7 +210,7 @@ const Engine = (() => {
     const fits = loadable && kvAvailRaw > 0 && maxSessions >= 1;
 
     // workload shape
-    const B = Math.max(1, Math.round(wl.users * wl.activity));
+    const B = concurrency(wl);
     const residentUsers = wl.retention === 'gpu' ? wl.users : B;
     const sessionsPerRep = Math.ceil(residentUsers / R);
     const bPerRep = Math.ceil(B / R);
@@ -278,12 +308,12 @@ const Engine = (() => {
     const bSpeed = fits ? bSpeedSearch() : 0;
     let maxConc, maxUsers;
     if (wl.retention === 'gpu') {
-      const usersMem = maxSessions * R, usersSpeed = Math.floor(bSpeed * R / wl.activity);
+      const usersMem = maxSessions * R, usersSpeed = usersFor(bSpeed * R, wl);
       maxUsers = Math.min(usersMem, usersSpeed);
       maxConc = Math.floor(maxUsers * wl.activity);
     } else {
       maxConc = Math.min(maxSessions, bSpeed) * R;
-      maxUsers = Math.floor(maxConc / wl.activity);
+      maxUsers = usersFor(maxConc, wl);
     }
     const at = fits ? loadAt(Math.min(bPerRep, Math.max(1, maxSessions)), opt.spec) : null;
     const speedOK = !!at && memOK && ttftOK && at.perUser >= wl.target && !at.saturated;
@@ -379,10 +409,10 @@ const Engine = (() => {
   }
 
   /* smallest layout (tp × pp) on which the model loads with one session of `ctx` tokens */
-  function minGpus(hw, model0, wPrec, kvPrec, ctx, adv0) {
+  function minGpus(hw, model0, wPrec, kvPrec, ctx, adv0, dpAttention) {
     const model = norm(model0), adv = Object.assign({}, DEFAULT_ADV, adv0 || {});
     if (formatSupport(hw, wPrec, adv.engine) === 'unsupported' || kvSupport(hw, kvPrec, adv.engine) !== 'supported') return null;
-    const W = weightBytes(model, wPrec), need = kvAtCtx(model, kvPrec, ctx);
+    const W = weightBytes(model, wPrec, hw), need = kvAtCtx(model, kvPrec, ctx);
     const cands = [];
     for (const tp of TP_CANDIDATES) {
       if (model.nHeads % tp !== 0 || tp > Math.max(hw.nodeGpus, 1)) continue;
@@ -391,7 +421,7 @@ const Engine = (() => {
     cands.sort((a, b) => a.G - b.G || b.tp - a.tp);
     for (const c of cands) {
       const overhead = adv.overheadGB * 1e9 + adv.overheadFrac * (W / c.G);
-      const kvRepl = isMla(model) ? 1 : Math.max(1, c.tp / model.nKv);
+      const kvRepl = dpAttention ? 1 : (isMla(model) ? c.tp : Math.max(1, c.tp / model.nKv));   // same rule as evaluate()
       const avail = (c.G * (hw.mem * 1e9 * adv.util - overhead) - W) * (1 - adv.frag) / kvRepl;
       if (avail >= need) return c;
     }
@@ -409,7 +439,7 @@ const Engine = (() => {
   }
   function reverse(p, hardwareList) {
     const model = norm(p.model), wl = p.wl;
-    const B = Math.max(1, Math.round(wl.users * wl.activity));
+    const B = concurrency(wl);
     const results = [];
     for (const hw of hardwareList) {
       const nodeGpus = hw.nodeGpus;
@@ -425,17 +455,13 @@ const Engine = (() => {
           const r1 = evaluate(Object.assign({}, p, { hw, nodeGpus, link: hw.link, tp, pp, replicas: 1, count: G }));
           if (!r1.fits) continue;
           if (!r1.ttftOK) { reason = `Fits, but prefilling ${fmtTok(r1.warmNew)} tokens takes ${fmtTime(r1.ttft)} on TP ${tp}, over the ${fmtTime(r1.ttftMax)} limit.`; continue; }
-          let R;
-          if (wl.retention === 'gpu') {
-            const perRep = Math.min(r1.maxSessions, Math.floor(r1.bSpeed / wl.activity));
-            if (perRep < 1) { reason = `Fits, but ${fmtTok(wl.ctx)} sessions cannot reach ${wl.target} tok/s per user.`; continue; }
-            R = Math.ceil(wl.users / perRep);
-          } else {
-            const perRep = Math.min(r1.maxSessions, r1.bSpeed);
-            if (perRep < 1) { reason = `Fits, but a ${fmtTok(wl.ctx)}-token session cannot reach ${wl.target} tok/s per user (${r1.at ? r1.at.perUser.toFixed(1) : '?'} tok/s alone).`; continue; }
-            R = Math.ceil(B / perRep);
+          if (r1.bSpeed < 1) { reason = wl.retention === 'gpu' ? `Fits, but ${fmtTok(wl.ctx)} sessions cannot reach ${wl.target} tok/s per user.` : `Fits, but a ${fmtTok(wl.ctx)}-token session cannot reach ${wl.target} tok/s per user (${r1.at ? r1.at.perUser.toFixed(1) : '?'} tok/s alone).`; continue; }
+          // replicas for memory (resident sessions) and for speed (peak concurrency); rounding can leave one short, so step up
+          let R = Math.max(Math.ceil((wl.retention === 'gpu' ? wl.users : B) / r1.maxSessions), Math.ceil(B / r1.bSpeed)), r;
+          for (let tries = 0; tries < 4; tries++, R++) {
+            r = evaluate(Object.assign({}, p, { hw, nodeGpus, link: hw.link, tp, pp, replicas: R, count: G * R }));
+            if (r.memOK && r.speedOK) break;
           }
-          const r = evaluate(Object.assign({}, p, { hw, nodeGpus, link: hw.link, tp, pp, replicas: R, count: G * R }));
           if (!(r.memOK && r.speedOK)) continue;
           if (betterRev(r, best)) best = r;
         }
@@ -474,7 +500,7 @@ const Engine = (() => {
   }
 
   return { BYTES_W, BYTES_KV, W_PRECS, KV_PRECS, PREC_LABEL, KV_LABEL, DEFAULT_ADV, TP_CANDIDATES, PP_CANDIDATES,
-    norm, isMla, weightBytes, expertSplit, touched, kvSplit, kvAtCtx, kvPerTokenFull, attnFlopsPerTok, prefillAttnFlops, peakFlops,
+    norm, isMla, weightBytes, bytesPerParam, keep16Params, concurrency, usersFor, expertSplit, touched, kvSplit, kvAtCtx, kvPerTokenFull, attnFlopsPerTok, prefillAttnFlops, peakFlops,
     formatSupport, hwSupport, kvSupport, familyOf, evaluate, autoConfig, layouts, minGpus, reverse, fmtTok, fmtGB, fmtTime };
 })();
 

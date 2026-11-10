@@ -84,7 +84,7 @@
   const DEFAULTS = {
     mode: 'forward', hw: 'h100-sxm', count: 8, nodeGpus: 8, link: 'auto', net: 'ib3200', hostRam: 1024,
     model: 'llama-3.3-70b', wPrec: 'bf16', kvPrec: 'fp8', engine: 'vllm', par: 'auto', tp: 8, pp: 1, reps: 1, dpAttn: false,
-    users: 50, activityPreset: 'assist', activity: 25, ctx: 131072, prefix: 2048, newPrompt: 1000, output: 500, retention: 'host', target: 20, ttftMax: 30,
+    users: 50, activityPreset: 'assist', activity: 25, peakZ: 1.65, ctx: 131072, prefix: 2048, newPrompt: 1000, output: 500, retention: 'host', target: 20, ttftMax: 30,
     prefixCache: true, spec: false, specK: 4, specAlpha: 70, pd: false, allowCrossTp: false,
     candidates: ['h100-sxm', 'h200-sxm', 'b200', 'b300', 'gb200', 'mi300x', 'mi325x', 'mi355x', 'l40s', 'rtx-pro-6000', 'a100-sxm-80', 'rtx-4090'],
     compatCtx: 32768,
@@ -106,7 +106,7 @@
       dpAttention: !!st.dpAttn, allowCrossTp: !!st.allowCrossTp,
       tp: Math.max(1, st.tp | 0), pp: Math.max(1, st.pp | 0), replicas: Math.max(1, st.reps | 0),
       wl: {
-        users: Math.max(1, st.users | 0), activity: Math.min(1, Math.max(0.01, (+st.activity || 1) / 100)),
+        users: Math.max(1, st.users | 0), activity: Math.min(1, Math.max(0.01, (+st.activity || 1) / 100)), peakZ: Math.max(0, +st.peakZ || 0),
         ctx: Math.max(256, st.ctx | 0), prefix: Math.max(0, st.prefix | 0), newPrompt: Math.max(1, st.newPrompt | 0),
         output: Math.max(1, st.output | 0), retention: st.retention, target: Math.max(0.1, +st.target || 1), ttftMax: Math.max(0.1, +st.ttftMax || 30),
       },
@@ -129,7 +129,7 @@
   const BIND = [
     ['hw', 'hw', 'str'], ['count', 'count', 'int'], ['nodeGpus', 'nodeGpus', 'int'], ['link', 'link', 'str'], ['net', 'net', 'str'], ['hostRam', 'hostRam', 'num'],
     ['model', 'model', 'str'], ['engine', 'engine', 'str'], ['wPrec', 'wPrec', 'str'], ['kvPrec', 'kvPrec', 'str'], ['par', 'par', 'str'], ['tp', 'tp', 'int'], ['pp', 'pp', 'int'], ['reps', 'reps', 'int'], ['dpAttn', 'dpAttn', 'bool'],
-    ['users', 'users', 'int'], ['activityPreset', 'activityPreset', 'str'], ['activity', 'activity', 'num'], ['ctx', 'ctx', 'int'], ['prefix', 'prefix', 'int'], ['newPrompt', 'newPrompt', 'int'], ['output', 'output', 'int'], ['retention', 'retention', 'str'], ['target', 'target', 'num'], ['ttftMax', 'ttftMax', 'num'],
+    ['users', 'users', 'int'], ['activityPreset', 'activityPreset', 'str'], ['activity', 'activity', 'num'], ['peakZ', 'peakZ', 'num'], ['ctx', 'ctx', 'int'], ['prefix', 'prefix', 'int'], ['newPrompt', 'newPrompt', 'int'], ['output', 'output', 'int'], ['retention', 'retention', 'str'], ['target', 'target', 'num'], ['ttftMax', 'ttftMax', 'num'],
     ['prefixCache', 'prefixCache', 'bool'], ['spec', 'spec', 'bool'], ['specK', 'specK', 'int'], ['specAlpha', 'specAlpha', 'num'], ['pd', 'pd', 'bool'], ['allowCrossTp', 'allowCrossTp', 'bool'],
     ['compatCtx', 'compatCtx', 'int'],
     ['advUtil', 'adv.util', 'num'], ['advOverheadGB', 'adv.overheadGB', 'num'], ['advOverheadFrac', 'adv.overheadFrac', 'num'], ['advBwEff', 'adv.bwEff', 'num'], ['advMfu', 'adv.mfu', 'num'],
@@ -318,7 +318,7 @@
     // KPIs
     const a = r.at;
     const tiles = [
-      tile('Concurrent requests supported', r.fits ? fmtNum(r.maxConc) : '0', r.fits ? `≈ ${fmtNum(r.maxUsers)} users at ${pct(wl.activity)} active · you asked for ${fmtNum(r.B)}` : 'model does not load', r.fits && r.maxConc >= r.B ? 'good' : 'bad', true, 'concurrent'),
+      tile('Concurrent requests supported', r.fits ? fmtNum(r.maxConc) : '0', r.fits ? `≈ ${fmtNum(r.maxUsers)} users at ${pct(wl.activity)} active · you need ${fmtNum(r.B)}${wl.peakZ ? ' at peak' : ''}` : 'model does not load', r.fits && r.maxConc >= r.B ? 'good' : 'bad', true, 'concurrent'),
       tile('Context per session at your load', r.fits ? fmtTok(r.maxCtxAtLoad) : '—', `${fmtNum(r.sessionsPerRep)} sessions resident per replica · model max ${fmtTok(model.maxCtx)}`, r.maxCtxAtLoad >= wl.ctx ? 'good' : 'bad', false, 'ctx-at-load'),
       tile('Speed per user', a ? fmtTokS(a.perUser) + ' tok/s' : '—', a ? `target ≥ ${wl.target} · ${fmtTime(a.itl)} between tokens` : '', a && a.perUser >= wl.target && !a.saturated ? 'good' : 'bad', false, 'speed-per-user'),
       tile('Aggregate throughput', a ? fmtNum(r.aggTotal) + ' tok/s' : '—', r.costPerMTok != null ? `${fmtMoney(r.costPerMTok)} per 1M output tokens at ~${fmtMoney(r.price, 0)}/h` : (r.kW ? `${fmtNum(r.kW, 1)} kW of accelerators` : ''), null, false, 'aggregate'),
@@ -341,7 +341,7 @@
     const wl = p.wl, model = r.model, layout = `${r.total}× ${r.hw.name}`;
     const who = `${fmtNum(wl.users)} users (${fmtNum(r.B)} concurrent at ${pct(wl.activity)} active)`;
     if (!r.fits) {
-      const mg = E.minGpus(r.hw, model, p.wPrec, p.kvPrec, Math.min(wl.ctx, 32768), p.adv);
+      const mg = E.minGpus(r.hw, model, p.wPrec, p.kvPrec, Math.min(wl.ctx, 32768), p.adv, p.dpAttention);
       return [
         h('strong', null, `${model.name} in ${E.PREC_LABEL[p.wPrec]} does not load on ${layout}.`),
         h('p', null, `Weights take ${fmtGB(r.W)}; ${r.G} accelerators offer ${fmtGB(Math.max(0, r.G * r.capPerGpu))} after runtime overhead. `, mg ? `The smallest layout that loads it here is ${mg.G} accelerators (TP ${mg.tp} × PP ${mg.pp}) for one 32k session; lower the weight precision or pick bigger memory.` : 'No layout up to 64-way tensor × 16-stage pipeline parallelism loads it on this hardware.'),
@@ -595,8 +595,8 @@
     labelPrecOptions(null);
     $('#precHint').replaceChildren(checkpointNode(model, p.wPrec));
     const list = allHardware().filter((hw) => state.candidates.includes(hw.id));
-    const B = Math.max(1, Math.round(p.wl.users * p.wl.activity));
-    $('#revIntro').textContent = `Smallest layout per accelerator type that serves ${fmtNum(p.wl.users)} users (${fmtNum(B)} concurrent at ${pct(p.wl.activity)} active) of ${model.name} at ${fmtTok(p.wl.ctx)} context with at least ${p.wl.target} tok/s each and a first token within ${fmtTime(p.wl.ttftMax)}. Session KV: ${fmtGB(E.kvAtCtx(model, p.kvPrec, p.wl.ctx))} in ${E.KV_LABEL[p.kvPrec]}; all sessions: ${fmtGB(E.kvAtCtx(model, p.kvPrec, p.wl.ctx) * (p.wl.retention === 'gpu' ? p.wl.users : B))}.`;
+    const B = E.concurrency(p.wl);
+    $('#revIntro').textContent = `Smallest layout per accelerator type that serves ${fmtNum(p.wl.users)} users (${fmtNum(B)} concurrent at ${pct(p.wl.activity)} active${p.wl.peakZ ? ', peaks included' : ''}) of ${model.name} at ${fmtTok(p.wl.ctx)} context with at least ${p.wl.target} tok/s each and a first token within ${fmtTime(p.wl.ttftMax)}. Session KV: ${fmtGB(E.kvAtCtx(model, p.kvPrec, p.wl.ctx))} in ${E.KV_LABEL[p.kvPrec]}; all sessions: ${fmtGB(E.kvAtCtx(model, p.kvPrec, p.wl.ctx) * (p.wl.retention === 'gpu' ? p.wl.users : B))}.`;
     if (!list.length) { $('#revSummary').replaceChildren(); $('#revTable').replaceChildren(h('p', { class: 'hint' }, 'Pick at least one candidate accelerator in the left rail.')); return; }
     const results = E.reverse(p, list);
     const feasible = results.filter((r) => !r.infeasible);
@@ -651,7 +651,7 @@
       const m = E.norm(m0);
       return h('tr', null, h('td', { class: 't sticky' }, m.name), h('td', { class: 'n' }, fmtGB(E.kvPerTokenFull(m, p.kvPrec))), hws.map((hw) => {
         const unsupported = E.formatSupport(hw, p.wPrec, p.engine) === 'unsupported' || E.kvSupport(hw, p.kvPrec, p.engine) !== 'supported';
-        const mg = unsupported ? null : E.minGpus(hw, m, p.wPrec, p.kvPrec, ctx, p.adv);
+        const mg = unsupported ? null : E.minGpus(hw, m, p.wPrec, p.kvPrec, ctx, p.adv, p.dpAttention);
         const cls = !mg ? 'none' : mg.G === 1 ? 'one' : mg.G <= hw.nodeGpus ? 'node' : 'multi';
         return h('td', { class: 'n cell ' + cls, title: unsupported ? `${hw.name}: ${E.PREC_LABEL[p.wPrec]} weights are not loadable on ${(ARCHS[hw.arch] || {}).name || 'this generation'}` : mg ? `${hw.name}: ${mg.G} (TP ${mg.tp} × PP ${mg.pp})` : `${hw.name}: no layout up to 64 × 16 loads it` }, unsupported ? '✕' : mg ? String(mg.G) : '—');
       }));

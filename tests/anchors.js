@@ -13,7 +13,8 @@ const net = NETWORKS.find((n) => n.id === 'ib3200');
 
 const FIT = [
   { name: 'gpt-oss-120b (MXFP4) runs on a single 80 GB H100', src: 'OpenAI gpt-oss model card, Aug 2025', hw: 'h100-sxm', model: 'gpt-oss-120b', wPrec: 'fp4', kvPrec: 'bf16', ctx: 8192, expectG: 1 },
-  { name: 'gpt-oss-20b (MXFP4) runs within 16 GB', src: 'OpenAI gpt-oss model card, Aug 2025', hw: { id: 'gpu-16gb', name: '16 GB GPU', mem: 16, bw: 900, tflops: { fp16: 100, fp8: 200 }, arch: 'sm89', nodeGpus: 1, link: 'none', linkBw: 0 }, model: 'gpt-oss-20b', wPrec: 'fp4', kvPrec: 'bf16', ctx: 8192, expectG: 1 },
+  { name: 'gpt-oss-20b (MXFP4) runs within 16 GB', src: 'OpenAI gpt-oss model card, Aug 2025', hw: { id: 'gpu-16gb', name: '16 GB GPU', mem: 16, bw: 900, tflops: { fp16: 100, fp8: 200 }, arch: 'sm89', nodeGpus: 1, link: 'none', linkBw: 0 }, model: 'gpt-oss-20b', wPrec: 'fp4', kvPrec: 'bf16', ctx: 8192, expectG: 1,
+    adv: { util: 0.97, overheadGB: 0.5 } },   // local runtimes (Ollama, llama.cpp, LM Studio) on a 16 GB card, not vLLM's 90% reservation
   { name: 'Llama 3.1 405B in FP8 fits one 8× H100 80 GB node', src: 'Meta "Introducing Llama 3.1" blog, Jul 2024', hw: 'h100-sxm', model: 'llama-3.1-405b', wPrec: 'fp8', kvPrec: 'bf16', ctx: 8192, expectG: 8 },
   { name: 'DeepSeek-V3 (FP8) serves on 8× H200', src: 'DeepSeek-V3 README, Dec 2024', hw: 'h200-sxm', model: 'deepseek-v3', wPrec: 'fp8', kvPrec: 'bf16', ctx: 8192, expectG: 8 },
   { name: 'Llama 3.3 70B in BF16 does not fit 2× H100 80 GB (needs 4)', src: 'weights alone are 141 GB', hw: 'h100-sxm', model: 'llama-3.3-70b', wPrec: 'bf16', kvPrec: 'bf16', ctx: 8192, expectG: 4 },
@@ -22,6 +23,10 @@ const FIT = [
 const MEASURED = [
   { name: 'vLLM: Llama 3.1 70B BF16, TP 8 on 8× H100 SXM, gpu_memory_utilization 0.9 → KV cache of ~1.3M tokens', src: 'vLLM engine log "GPU KV cache size" as reported by users; e.g. vLLM GitHub discussions on 70B/H100 capacity',
     hw: 'h100-sxm', model: 'llama-3.3-70b', wPrec: 'bf16', kvPrec: 'bf16', tp: 8, pp: 1, metric: 'kvTokens', expect: 1.3e6, tol: 0.15 },
+  { name: 'gpt-oss-120b checkpoint (MXFP4 experts, BF16 attention and embeddings) is 60.8 GiB', src: 'OpenAI gpt-oss model card, Aug 2025',
+    hw: 'h100-sxm', model: 'gpt-oss-120b', wPrec: 'fp4', kvPrec: 'bf16', tp: 1, pp: 1, metric: 'weightsGB', expect: 60.8 * 1.073741824, tol: 0.05 },
+  { name: 'gpt-oss-20b checkpoint is 12.8 GiB', src: 'OpenAI gpt-oss model card, Aug 2025',
+    hw: 'h100-sxm', model: 'gpt-oss-20b', wPrec: 'fp4', kvPrec: 'bf16', tp: 1, pp: 1, metric: 'weightsGB', expect: 12.8 * 1.073741824, tol: 0.05 },
   // Add your own, e.g.:
   // { name: 'my cluster: Llama 3.3 70B FP8 on 4× H100, 64 concurrent, 4k ctx, per-user tok/s', src: 'vllm bench serve 2026-xx-xx', hw: 'h100-sxm', model: 'llama-3.3-70b', wPrec: 'fp8', kvPrec: 'fp8', tp: 4, pp: 1, metric: 'perUserTokS', b: 64, ctx: 4096, output: 256, expect: 41, tol: 0.25 },
 ];
@@ -32,7 +37,7 @@ const base = (o) => Object.assign({ hw: hw('h100-sxm'), model: md('llama-3.3-70b
 console.log('Fit anchors');
 for (const a of FIT) {
   const h = typeof a.hw === 'string' ? hw(a.hw) : a.hw;
-  const r = E.minGpus(h, md(a.model), a.wPrec, a.kvPrec, a.ctx);
+  const r = E.minGpus(h, md(a.model), a.wPrec, a.kvPrec, a.ctx, a.adv);
   const got = r ? r.G : null;
   const ok = got != null && got <= a.expectG && (a.expectG === 1 ? got === 1 : true);
   if (!ok) fail++;
@@ -49,6 +54,7 @@ for (const a of MEASURED) {
   else if (a.metric === 'perUserTokS') got = r.loadAt(a.b, false).perUser;
   else if (a.metric === 'aggTokS') got = r.loadAt(a.b, false).agg;
   else if (a.metric === 'ttft') got = r.ttft;
+  else if (a.metric === 'weightsGB') got = r.W / 1e9;
   const rel = Math.abs(got - a.expect) / a.expect;
   const ok = rel <= a.tol;
   if (!ok) fail++;
