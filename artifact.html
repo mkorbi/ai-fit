@@ -257,6 +257,36 @@ dl.glossary dd { margin: 0 0 4px; color: var(--ink-2); }
 .sim-keybox[open] > .sim-key { margin-top: 6px; }
 .sim-keynote { font-size: 12px; color: #9aa3ad; }
 .sim-keynote:empty { display: none; }
+/* engine stack */
+.stk { display: grid; gap: 18px; max-width: 1240px; margin-inline: auto; width: 100%; }
+.stk-switch { display: flex; flex-wrap: wrap; gap: 10px; }
+.stk-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (min-width: 1000px) { .stk-grid { grid-template-columns: minmax(0, 1fr) 340px; } }
+.stk-side { display: grid; gap: 18px; }
+.stk-layers { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.stk-layer { display: grid; gap: 8px; border: 1px solid var(--line); border-left: 5px solid var(--accent); background: var(--surface-2); padding: 10px 12px; }
+.stk-layer.need-recommended { border-left-color: var(--s1); }
+.stk-layer.need-optional { border-left-color: var(--line); opacity: 0.55; }
+.stk-layer.need-none { border-left-color: var(--line); opacity: 0.35; }
+.stk-sub { font-family: var(--font-display); font-size: 14px; margin-top: 10px; }
+.stk-sources summary { cursor: pointer; }
+.stk-sources ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 3px; font-size: 13px; }
+.stk-lhead { display: grid; gap: 3px; }
+.stk-lhead > div { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.stk-lname { font-family: var(--font-display); font-size: 16px; }
+.stk-lpurpose { font-size: 13px; color: var(--ink-2); max-width: 80ch; }
+.stk-opts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.stk-opt { display: inline-flex; gap: 6px; align-items: baseline; border: 1px solid var(--line); background: var(--surface); padding: 3px 8px; font-size: 13px; }
+.stk-opt a { color: var(--ink); text-decoration: none; }
+.stk-opt a:hover { text-decoration: underline; }
+.stk-opt.pick { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.stk-lic { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
+.stk-lres { font-size: 12.5px; color: var(--ink-2); }
+.stk-note { color: var(--muted); }
+.stk-kpis { margin: 8px 0; }
+.stk-dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; font-size: 13px; margin-top: 10px; }
+.stk-dl dt { color: var(--muted); }
+.stk-dl dd { margin: 0; }
 .sim-hud { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 @media (min-width: 700px) { .sim-hud { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (min-width: 1000px) { .sim-hud { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
@@ -314,6 +344,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
     <button class="tab" role="tab" data-mode="catalog" aria-selected="false" type="button">Catalog</button>
     <button class="tab" role="tab" data-mode="method" aria-selected="false" type="button">Method</button>
     <button class="tab" role="tab" data-mode="sim" aria-selected="false" type="button">Simulator</button>
+    <button class="tab" role="tab" data-mode="stack" aria-selected="false" type="button">Engine stack</button>
     <button class="tab" role="tab" data-mode="about" aria-selected="false" type="button">About</button>
   </nav>
 </header>
@@ -410,6 +441,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
         <section class="panel"><h3>Capacity frontier</h3><div id="chartCapacity"></div></section>
         <section class="panel"><h3>Speed per user under load</h3><div id="chartSpeed"></div></section>
         <section class="panel"><h3>Ways to serve more</h3><div id="ledger"></div></section>
+        <section class="panel"><h3>Buy or rent</h3><div id="costBody"></div></section>
         <section id="warnings"></section>
       </div>
     </div>
@@ -437,6 +469,7 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
     <div class="view" data-mode="catalog" id="viewCatalog" hidden>
       <div class="results">
         <section class="panel"><h3>Accelerators</h3><div id="catHardware"></div><p class="hint" style="margin-top:8px">~ marks entries with announced, derived or otherwise unconfirmed figures. Memory in decimal GB, bandwidth in GB/s, compute as dense TFLOPS (no sparsity). Native and weight-only formats come from the chip generation (one table per generation in catalog.js), not from the per-device row.</p><p class="hint" id="catLint" style="margin-top:6px"></p></section>
+        <section class="panel"><h3>Buy and rent</h3><div id="catCloud"></div><p class="hint" style="margin-top:8px">Purchase price per accelerator (~ marks estimates, for example a share of a full system price) and on-demand price per accelerator-hour at each provider; — means the provider does not offer that chip. Hover a price for the instance type; click it for the source. Only accelerators that at least one provider rents are listed.</p></section>
         <section class="panel"><h3>Engine support</h3><div id="catEngines"></div><p class="hint" style="margin-top:8px">Which weight formats and KV-cache dtypes each serving engine runs per hardware family, transcribed from the engines' docs on the date shown. "native" computes in that format, "weight-only" keeps the weights small but computes in BF16. Sources are linked below the table.</p></section>
         <section class="panel"><h3>Models</h3><div id="catModels"></div><p class="hint" style="margin-top:8px">KV per token counts every layer's K and V (or the MLA latent) in BF16; sliding-window layers still count in full here but are capped at their window when a session is sized. "Verified against" names the Hugging Face repo whose config.json the shape was checked against with <code>node tools/import-model.js --check</code>; "ships in" is the checkpoint's own precision.</p></section>
         <section class="panel"><h3>Add your own</h3>
@@ -449,6 +482,8 @@ textarea { width: 100%; min-height: 160px; font-family: var(--font-mono); font-s
     </div>
 
     <div class="view" data-mode="sim" id="viewSim" hidden></div>
+
+    <div class="view" data-mode="stack" id="viewStack" hidden></div>
 
     <div class="view about-grid" data-mode="about" id="viewAbout" hidden>
       <section class="panel prose about-main" aria-labelledby="aboutTitle">
@@ -570,8 +605,11 @@ all-to-all / layer = 2 · latency + 3 bytes · tokens_per_rank · k · d_model �
 </footer>
 
 <script src="catalog.js"></script>
+<script src="providers.js"></script>
 <script src="glossary.js"></script>
 <script src="engine.js"></script>
 <script src="sim.js"></script>
+<script src="stack-data.js"></script>
+<script src="stack.js"></script>
 <script src="app.js"></script>
 

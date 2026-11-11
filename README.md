@@ -27,6 +27,24 @@ people, activity, wanted speed, retention, prefix caching, speculative decoding)
 change one thing: context, GPU type, model, KV precision or weight precision. `node tests/sim.js` checks the presets
 and the sweeps.
 
+## Buy or rent
+
+Every accelerator carries a purchase price (`buy` in `catalog.js`: list or retail price, a share of a full system
+price, or an analyst estimate, each with its source). `providers.js` holds on-demand prices per accelerator-hour at
+AWS, Microsoft Azure and Google Cloud (USD) and at the European sovereign clouds Scaleway, STACKIT and OVHcloud (EUR,
+excluding VAT, not converted), with the instance type and source of each. The planner's "Buy or rent" panel prices
+the current layout at every provider, per month and per million tokens at your load, and shows after how many months
+buying would pay off (purchase price only, without power, hosting or staff). The Catalog lists the whole matrix.
+`node tests/prices.js` checks that every price points at a known accelerator and has a source.
+
+## Engine stack
+
+The Engine stack tab lays out the software around the accelerators for inference serving, fine-tuning and model
+training, with vLLM as the reference engine: twelve layers from drivers to identity, which purpose needs which, the
+options per layer with licences and links, the reference pick, and what each layer needs in CPU, RAM and disk, split
+into services beside the GPUs and the share on the GPU servers. The content lives in `stack-data.js`;
+`node tests/stack.js` checks it is complete.
+
 ## Run it
 
 Open `index.html` in a browser. Everything is client-side; the only network requests are the Google Fonts.
@@ -55,6 +73,9 @@ sed '1,/^<body>$/d; /^<\/body>$/,$d' index.html > artifact.html
 | File | What it holds |
 |---|---|
 | `catalog.js` | Accelerators (memory, bandwidth, dense TFLOPS per precision, fabric, node size, TDP, rough price, chip generation), the `ARCHS` generation → format table, and models (shape, attention layer types, MoE, context limits, shipped precision, Hugging Face repo) |
+| `providers.js` | On-demand price per accelerator-hour at AWS, Azure, Google Cloud, Scaleway, STACKIT and OVHcloud, with instance type and source; a missing entry means not offered |
+| `stack.js`, `stack-data.js` | The Engine stack tab: layers, options, reference picks and resource estimates for inference, fine-tuning and training |
+| `tests/prices.js`, `tests/stack.js` | Price and stack content checks |
 | `sim.js` | The Simulator: pixel-art serving simulation on a canvas, knobs, presets, limit explanation and one-knob sweeps, all computed by the engine |
 | `tests/sim.js` | Simulator consistency test (presets load, people never grow with context) |
 | `tools/import-model.js` | Derives or verifies model entries from Hugging Face `config.json` and safetensors metadata; finds and verifies quantized checkpoints (node 18+, no dependencies) |
