@@ -295,6 +295,7 @@
       else if (state.mode === 'reverse') renderReverse();
       else if (state.mode === 'compat') renderCompat();
       else if (state.mode === 'catalog') renderCatalog();
+      else if (state.mode === 'stack') StackView.render($('#viewStack'));
       if (state.mode === 'sim') Sim.render($('#viewSim')); else Sim.pause();
     } catch (err) {
       const v = $('#verdict'); if (v) { v.className = 'verdict bad'; v.replaceChildren(h('strong', null, 'Something went wrong while computing.'), h('p', null, String(err && err.message || err))); }
@@ -338,6 +339,7 @@
     renderCapacityChart(r, p);
     renderSpeedChart(r, p);
     renderLedger(r, p);
+    renderCost(r, p);
     renderWarnings(r);
   }
   function tile(label, value, sub, status, hero, term) {
@@ -588,6 +590,35 @@
     });
     el.replaceChildren(table(['Option', { t: 'Concurrent', k: 'concurrent' }, 'Users', { t: 'Context at load', k: 'ctx-at-load' }, { t: 'tok/s per user', k: 'speed-per-user' }, { t: 'TTFT', k: 'ttft' }, { t: '$ / 1M tok', k: 'cost-token' }, 'Verdict', ''], cells, { numeric: [1, 2, 3, 4, 5, 6] }));
   }
+  /* ----- buy or rent: the layout's accelerators bought outright vs rented from each provider ----- */
+  const HOURS_MONTH = 730;
+  const money = (n, cur) => (n == null || !isFinite(n)) ? '—' : (cur === 'EUR' ? '€' : '$') + n.toLocaleString('en-US', { minimumFractionDigits: n < 100 ? 2 : 0, maximumFractionDigits: n < 100 ? 2 : 0 });
+  function cloudOffer(provider, hwId) {
+    const e = ((typeof CLOUD !== 'undefined' && CLOUD[provider]) || {})[hwId];
+    return e === undefined ? { offered: false } : e;   // missing = not offered, null = unknown
+  }
+  function renderCost(r, p) {
+    const box = $('#costBody'); if (!box) return;
+    const hw = r.hw, n = r.gpusUsed || r.total, buy = hw.buy && hw.buy.usd != null ? hw.buy.usd * n : null;
+    const tokMonth = r.aggTotal > 0 ? r.aggTotal * 3600 * HOURS_MONTH : 0;
+    const out = [h('p', { class: 'hint' }, `${n} × ${hw.name}${hw.buy && hw.buy.usd != null ? `: ${money(buy, 'USD')} to buy (${money(hw.buy.usd, 'USD')} each, ${hw.buy.kind === 'system-share' ? 'share of a system price' : hw.buy.kind || 'list'}${hw.buy.approx ? ', estimate' : ''})` : ': no purchase price in the catalog'}. Rent prices are on-demand per accelerator-hour; a month is ${HOURS_MONTH} hours.`)];
+    if (typeof PROVIDERS === 'undefined') { box.replaceChildren(...out); return; }
+    const rows = PROVIDERS.map((pv) => {
+      const o = cloudOffer(pv.id, hw.id);
+      if (o == null) return { cls: 'muted', cells: [h('b', null, pv.name), pv.sovereign ? h('span', { class: 'chip info' }, 'EU sovereign') : '', 'unknown', '—', '—', '—', '—'] };
+      if (!o.offered) return { cls: 'muted', cells: [h('b', null, pv.name), pv.sovereign ? h('span', { class: 'chip info' }, 'EU sovereign') : '', 'not offered', '—', '—', '—', '—'] };
+      if (o.gpuHour == null) return { cls: 'muted', cells: [h('b', null, pv.name), pv.sovereign ? h('span', { class: 'chip info' }, 'EU sovereign') : '', h('a', { href: o.source || pv.pricingUrl, target: '_blank', rel: 'noopener' }, o.instance), 'no public price', '—', '—', '—'] };
+      const hour = o.gpuHour * n, month = hour * HOURS_MONTH;
+      const perM = tokMonth > 0 ? month / (tokMonth / 1e6) : null;
+      const even = buy != null && pv.currency === 'USD' ? buy / month : null;
+      return [h('b', null, pv.name), pv.sovereign ? h('span', { class: 'chip info' }, 'EU sovereign') : '',
+        h('a', { href: o.source || pv.pricingUrl, target: '_blank', rel: 'noopener', title: o.note || '' }, `${o.instance}${o.gpus ? ` (${o.gpus} per instance)` : ''}`),
+        money(o.gpuHour, pv.currency), money(month, pv.currency), perM != null ? money(perM, pv.currency) : '—', even != null ? `${even < 10 ? even.toFixed(1) : Math.round(even)} months` : '—'];
+    });
+    out.push(table(['Provider', '', 'Instance', 'Per GPU-hour', 'This layout per month', 'Per million tokens at your load', 'Buying pays off after'], rows, { numeric: [3, 4, 5, 6] }));
+    out.push(h('p', { class: 'hint', style: 'margin-top:8px' }, `Pay-off compares the purchase price with renting the same accelerators around the clock, without power, hosting, networking or staff, so the real break-even comes later. EU providers bill in euro and are not converted. Prices checked ${PROVIDERS.map((pv) => pv.checked).filter((v, i, a) => a.indexOf(v) === i).join(', ')}.`));
+    box.replaceChildren(...out);
+  }
   function renderWarnings(r) {
     const el = $('#warnings');
     if (!r.warnings.length) { el.replaceChildren(); return; }
@@ -699,13 +730,23 @@
     const hwRow = (hw) => [
       h('b', null, hw.name + (hw.approx ? ' ~' : '')), fmtNum(hw.mem), fmtNum(hw.bw), hw.tflops.fp16 ? fmtNum(hw.tflops.fp16) : '—', hw.tflops.fp8 ? fmtNum(hw.tflops.fp8) : '—', hw.tflops.fp4 ? fmtNum(hw.tflops.fp4) : '—',
       `${(LINKS[hw.link] || LINKS.none).name}${hw.linkBw ? ' ' + fmtNum(hw.linkBw) + ' GB/s' : ''}`, fmtNum(hw.nodeGpus), hw.tdp != null ? fmtNum(hw.tdp) : '—', hw.price != null ? fmtMoney(hw.price) : '—',
+      hw.buy && hw.buy.usd != null ? h('span', { title: hw.buy.note || '' }, money(hw.buy.usd, 'USD') + (hw.buy.approx ? ' ~' : '')) : '—',
       ARCHS[hw.arch] ? ARCHS[hw.arch].name : '—', ARCHS[hw.arch] ? ARCHS[hw.arch].native.map((x) => x.toUpperCase()).join(' ') : '—', ARCHS[hw.arch] ? ARCHS[hw.arch].weightOnly.map((x) => x.toUpperCase()).join(' ') : '—',
     ];
     const hwGroups = clusterBy(allHardware(), (hw) => hw.vendor).map(([vendor, list]) => ({
       key: vendor, label: vendor, rows: list.map(hwRow),
       meta: `${span(list.map((x) => x.mem), fmtNum, 'GB')} · ${span(list.map((x) => x.bw), fmtNum, 'GB/s')}`,
     }));
-    $('#catHardware').replaceChildren(groupedTable([{ t: 'Accelerator', k: 'accelerator' }, { t: 'Memory GB', k: 'mem-gb' }, { t: 'GB/s', k: 'bw' }, { t: 'BF16 TFLOPS', k: 'tflops-bf16' }, { t: 'FP8', k: 'tflops-fp8' }, { t: 'FP4', k: 'tflops-fp4' }, { t: 'Fabric', k: 'fabric' }, { t: 'Per node', k: 'per-node' }, { t: 'W', k: 'tdp' }, { t: '$/h', k: 'price' }, { t: 'Generation', k: 'generation' }, { t: 'Native formats', k: 'native-fmt' }, { t: 'Weight-only', k: 'weight-only' }], hwGroups, { numeric: [1, 2, 3, 4, 5, 7, 8, 9] }, 'cb.catHwOpen'));
+    $('#catHardware').replaceChildren(groupedTable([{ t: 'Accelerator', k: 'accelerator' }, { t: 'Memory GB', k: 'mem-gb' }, { t: 'GB/s', k: 'bw' }, { t: 'BF16 TFLOPS', k: 'tflops-bf16' }, { t: 'FP8', k: 'tflops-fp8' }, { t: 'FP4', k: 'tflops-fp4' }, { t: 'Fabric', k: 'fabric' }, { t: 'Per node', k: 'per-node' }, { t: 'W', k: 'tdp' }, { t: '$/h', k: 'price' }, { t: 'Buy $', k: 'buy' }, { t: 'Generation', k: 'generation' }, { t: 'Native formats', k: 'native-fmt' }, { t: 'Weight-only', k: 'weight-only' }], hwGroups, { numeric: [1, 2, 3, 4, 5, 7, 8, 9, 10] }, 'cb.catHwOpen'));
+    if (typeof PROVIDERS !== 'undefined' && $('#catCloud')) {
+      const cell = (pv, hw) => { const o = cloudOffer(pv.id, hw.id); return o == null ? h('span', { class: 'chip' }, '?') : !o.offered ? h('span', { class: 'muted-dash' }, '—') : o.gpuHour == null ? h('span', { title: o.instance }, 'offered, no price') : h('a', { href: o.source || pv.pricingUrl, target: '_blank', rel: 'noopener', title: `${o.instance}${o.gpus ? `, ${o.gpus} per instance` : ''}${o.note ? ' · ' + o.note : ''}` }, money(o.gpuHour, pv.currency)); };
+      const offeredAnywhere = (hw) => PROVIDERS.some((pv) => { const o = cloudOffer(pv.id, hw.id); return o && o.offered; });
+      const groups = clusterBy(allHardware().filter(offeredAnywhere), (hw) => hw.vendor).map(([vendor, list]) => ({
+        key: vendor, label: vendor, rows: list.map((hw) => [h('b', null, hw.name), hw.buy && hw.buy.usd != null ? money(hw.buy.usd, 'USD') + (hw.buy.approx ? ' ~' : '') : '—'].concat(PROVIDERS.map((pv) => cell(pv, hw)))),
+        meta: `${list.length} offered by at least one provider`,
+      }));
+      $('#catCloud').replaceChildren(groupedTable([{ t: 'Accelerator', k: 'accelerator' }, { t: 'Buy $', k: 'buy' }].concat(PROVIDERS.map((pv) => `${pv.name}${pv.sovereign ? ' (EU)' : ''} ${pv.currency === 'EUR' ? '€' : '$'}/h`)), groups, { numeric: [1].concat(PROVIDERS.map((_, i) => i + 2)) }, 'cb.catCloudOpen'));
+    }
     const fams = ['ampere', 'ada', 'hopper', 'blackwell', 'blackwell-sm120', 'cdna3', 'cdna4', 'gaudi', 'tpu', 'other'];
     const engRows = [];
     for (const [k, e] of Object.entries(ENGINES)) {
